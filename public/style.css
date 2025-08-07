@@ -52,6 +52,12 @@ h1, h3 { color: #333; border-bottom: 2px solid #eee; padding-bottom: 10px; }
 #submit-answer-btn:hover { background: #0056b3; }
 #vote-panel, #char-choice-panel { padding: 15px; margin: 0 20px 20px 20px; border-radius: 8px; text-align: center; }
 #vote-panel { background-color: #fff3cd; border: 1px solid #ffeeba; }
+.panel-header {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 15px;
+}
 #char-choice-panel { background-color: #d4edda; border: 1px solid #c3e6cb; }
 #vote-panel button, .char-choice-btn { padding: 8px 15px; margin: 0 10px; border-radius: 5px; border: 1px solid #ccc; cursor: pointer; }
 #vote-valid { background-color: #d4edda; }

@@ -88,7 +88,8 @@ function getSerializableRoomState(roomId) {
         } : null,
         choice: choiceTimeouts[roomId] ? { 
             winnerId: choiceTimeouts[roomId].winnerId, 
-            answer: choiceTimeouts[roomId].answer 
+            answer: choiceTimeouts[roomId].answer,
+            endTime: choiceTimeouts[roomId].endTime,
         } : null,
         playable: isPlayable,
         gameStateMessage: gameStateMessage,
@@ -481,9 +482,13 @@ function handleCorrectAnswer(roomId, submission) {
         room.usedSentences.shift();
     }
     
+
+    const CHOICE_DURATION_MS = 15000;
+    const choiceEndTime = Date.now() + CHOICE_DURATION_MS;
     choiceTimeouts[roomId] = {
         winnerId: winnerSocketId,
         answer: submission.answer,
+        endTime: choiceEndTime,
         timer: setTimeout(() => {
             if (choiceTimeouts[roomId]) {
                 const winnerNickname = room.players[winnerSocketId]?.nickname;
@@ -494,7 +499,7 @@ function handleCorrectAnswer(roomId, submission) {
                 const randomChar = normalizeSentence(submission.answer)[0] || '天';
                 startNewRound(roomId, randomChar, '系统');
             }
-        }, 15000),
+        }, CHOICE_DURATION_MS),
     };
     broadcastGameState(roomId);
 }

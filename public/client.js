@@ -45,6 +45,7 @@ let currentAction = null;
 let targetRoomId = null;
 let targetRoomName = null;
 let voteTimerInterval = null;
+let choiceTimerInterval = null;
 let myNickname = null;
 
 // ======================================================
@@ -158,6 +159,7 @@ function renderGame(state) {
     const votePanel = gameElements.votePanel;
     // 每次渲染前，都先清除旧的计时器，以防残留
     clearInterval(voteTimerInterval);
+    clearInterval(choiceTimerInterval);
 
     if (state.currentVote) {
         const { submission, voters } = state.currentVote;
@@ -215,6 +217,7 @@ function renderGame(state) {
 
     // 渲染选字面板
     const choicePanel = gameElements.charChoicePanel;
+
     if (state.choice && state.choice.winnerId === socket.id) {
         gameElements.charButtonsContainer.innerHTML = '';
         const uniqueChars = [...new Set(state.choice.answer.replace(/[\s\p{P}]/gu, ''))];
@@ -227,6 +230,20 @@ function renderGame(state) {
             });
             gameElements.charButtonsContainer.appendChild(button);
         });
+
+        // 如果有截止时间，则启动UI倒计时
+        if (state.choice.endTime) {
+            const choiceTimerSpan = document.getElementById('choice-timer');
+            const updateTimer = () => {
+                const remainingSeconds = Math.max(0, Math.round((state.choice.endTime - Date.now()) / 1000));
+                choiceTimerSpan.textContent = remainingSeconds;
+                if (remainingSeconds <= 0) {
+                    clearInterval(choiceTimerInterval);
+                }
+            };
+            updateTimer(); // 立即执行一次以显示初始时间
+            choiceTimerInterval = setInterval(updateTimer, 1000);
+        }
         choicePanel.style.display = 'block';
     } else {
         choicePanel.style.display = 'none';
