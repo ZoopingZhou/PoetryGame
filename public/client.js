@@ -44,7 +44,7 @@ const gameElements = {
 let currentAction = null;
 let targetRoomId = null;
 let targetRoomName = null;
-let voteInterval;
+let voteTimerInterval = null;
 let myNickname = null;
 
 // ======================================================
@@ -156,6 +156,9 @@ function renderGame(state) {
 
     // 渲染投票面板
     const votePanel = gameElements.votePanel;
+    // 每次渲染前，都先清除旧的计时器，以防残留
+    clearInterval(voteTimerInterval);
+
     if (state.currentVote) {
         const { submission, voters } = state.currentVote;
         const voteContent = votePanel.querySelector('.vote-content');
@@ -192,6 +195,19 @@ function renderGame(state) {
             voteWaiting.innerHTML = `<p>正在对 [<strong>${submission.answer}</strong>] 进行投票，请等待本轮结束...</p>`;
         }
         
+        // 如果有截止时间，则启动UI倒计时
+        if (state.currentVote.endTime) {
+            const voteTimerSpan = votePanel.querySelector('#vote-timer');
+            const updateTimer = () => {
+                const remainingSeconds = Math.max(0, Math.round((state.currentVote.endTime - Date.now()) / 1000));
+                voteTimerSpan.textContent = remainingSeconds;
+                if (remainingSeconds <= 0) {
+                    clearInterval(voteTimerInterval);
+                }
+            };
+            updateTimer(); // 立即执行一次以显示初始时间
+            voteTimerInterval = setInterval(updateTimer, 1000);
+        }
         votePanel.style.display = 'block';
     } else {
         votePanel.style.display = 'none';

@@ -84,6 +84,7 @@ function getSerializableRoomState(roomId) {
             submission: room.currentVote.submission,
             voters: room.currentVote.voters,
             votes: room.currentVote.votes,
+            endTime: room.currentVote.endTime,
         } : null,
         choice: choiceTimeouts[roomId] ? { 
             winnerId: choiceTimeouts[roomId].winnerId, 
@@ -377,6 +378,7 @@ function scheduleSaveRooms() {
                         submission: rooms[roomId].currentVote.submission,
                         votes: rooms[roomId].currentVote.votes,
                         voters: rooms[roomId].currentVote.voters,
+                        endTime: rooms[roomId].currentVote.endTime,
                     } : null,
                 };
             }
@@ -506,16 +508,19 @@ function startPlayerVote(roomId, submission) {
         .filter((player) => player.nickname !== submission.nickname)
         .map(player => player.nickname);
 
+    const VOTE_DURATION_MS = 15000;
+    const voteEndTime = Date.now() + VOTE_DURATION_MS;
     const timeouts = {};
     voters.forEach(nickname => {
         timeouts[nickname] = setTimeout(() => {
             handleVoteTimeout(roomId, nickname);
-        }, 15000);
+        }, VOTE_DURATION_MS);
     });
 
     room.currentVote = {
         submission: submission,
         votes: {},
+        endTime: voteEndTime,
         voters: voters,
         timeouts: timeouts,
     };

@@ -1,1 +1,22 @@
-{}
+{
+  "E61E": {
+    "id": "E61E",
+    "name": "E61E",
+    "players": {
+      "qvCjfBkAJ_qooCnDAAAB": {
+        "nickname": "Kedit",
+        "score": 0,
+        "online": true
+      },
+      "lG3zVHPAJ5XcZ14FAAAD": {
+        "nickname": "Alex",
+        "score": 0,
+        "online": true
+      }
+    },
+    "currentStartChar": "月",
+    "usedSentences": [],
+    "validationQueue": [],
+    "currentVote": null
+  }
+}
