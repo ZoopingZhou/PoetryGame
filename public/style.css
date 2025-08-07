@@ -1,0 +1,69 @@
+/* (文件顶部和中间的样式保持不变) */
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    margin: 0;
+    background-color: #f0f2f5;
+    color: #333;
+}
+#lobby-container { max-width: 800px; margin: 40px auto; padding: 20px; background-color: #fff; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+#lobby-container h1 { text-align: center; color: #007bff; }
+.lobby-main { display: flex; gap: 40px; margin-top: 20px; }
+.room-list-panel, .create-room-panel { flex: 1; padding: 20px; border: 1px solid #ddd; border-radius: 8px; }
+.create-room-panel { text-align: center; display: flex; flex-direction: column; justify-content: center; }
+#room-list { list-style-type: none; padding: 0; margin: 0; max-height: 400px; overflow-y: auto; }
+#room-list li { display: flex; align-items: center; padding: 15px; border-bottom: 1px solid #eee; }
+#room-list li:last-child { border-bottom: none; }
+#room-list li.no-rooms { justify-content: center; color: #888; font-style: italic; }
+.room-name { font-weight: bold; flex-grow: 1; }
+.room-players { color: #666; margin: 0 15px; }
+.join-room-btn { background: #28a745; color: white; border: none; padding: 8px 15px; border-radius: 5px; cursor: pointer; }
+.create-btn { background-color: #007bff; color: white; border: none; padding: 15px 25px; border-radius: 8px; cursor: pointer; font-size: 1.1em; font-weight: bold; }
+#room-name-input, #nickname-input { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 5px; box-sizing: border-box; }
+#nickname-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 1000; display: flex; align-items: center; justify-content: center; display: none; }
+#modal-overlay { position: absolute; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.6); }
+#modal-content { position: relative; background: white; padding: 30px 40px; border-radius: 8px; text-align: center; width: 320px; box-shadow: 0 5px 15px rgba(0,0,0,0.3); }
+#nickname-form .button-group { margin-top: 15px; }
+#nickname-form button { flex: 1; padding: 10px; }
+.error-message { color: #d93025; min-height: 1.2em; }
+#room-not-found-container { display: flex; align-items: center; justify-content: center; height: 100vh; text-align: center; display: none; }
+#room-not-found-container .panel { max-width: 500px; padding: 40px; background-color: #fff; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+#room-not-found-container p { font-size: 1.1em; color: #666; margin-top: 0; }
+#invalid-room-id { font-family: "Courier New", Courier, monospace; background-color: #eee; padding: 2px 6px; border-radius: 4px; }
+.button-group { margin-top: 30px; display: flex; gap: 20px; justify-content: center; }
+.button-group button { padding: 12px 25px; font-size: 1em; border-radius: 5px; border: 1px solid #ddd; cursor: pointer; }
+#go-to-lobby-btn, .cancel-btn { background-color: #6c757d; color: white; border-color: #6c757d; }
+#create-this-room-btn, #nickname-form button[type="submit"] { background-color: #007bff; color: white; border-color: #007bff; }
+#game-container { display: flex; height: 100vh; display: none; }
+#left-panel { width: 300px; background-color: #ffffff; padding: 20px; border-right: 1px solid #ddd; box-shadow: 0 0 10px rgba(0,0,0,0.05); display: flex; flex-direction: column; gap: 20px; }
+.leave-btn { display: block; width: 100%; padding: 10px; margin-bottom: 20px; background-color: #dc3545; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 1em; }
+.leave-btn:hover { background-color: #c82333; }
+#right-panel { flex-grow: 1; display: flex; flex-direction: column; background-color: #f7f7f7; overflow: hidden; }
+h1, h3 { color: #333; border-bottom: 2px solid #eee; padding-bottom: 10px; }
+#game-info p, #score-container li, #queue-container li { font-size: 16px; color: #555; }
+#start-char { font-size: 2em; color: #007bff; }
+#score-board, #queue-list { list-style-type: none; padding: 0; }
+#messages { list-style-type: none; margin: 0; padding: 20px; overflow-y: auto; flex: 1; }
+#messages li { padding: 8px 12px; margin-bottom: 8px; border-radius: 8px; background: #e9e9eb; max-width: 80%; word-wrap: break-word; }
+#messages li.game-message { background-color: #d1ecf1; color: #0c5460; text-align: center; max-width: 100%; font-style: italic; }
+#form { display: flex; padding: 20px; background-color: #fff; border-top: 1px solid #ddd; }
+#input { border: 1px solid #ccc; padding: 10px; width: 100%; margin-right: 10px; border-radius: 5px; }
+#form button { border: none; padding: 10px 20px; color: white; border-radius: 5px; cursor: pointer; }
+#submit-answer-btn { background: #007bff; }
+#submit-answer-btn:hover { background: #0056b3; }
+#vote-panel, #char-choice-panel { padding: 15px; margin: 0 20px 20px 20px; border-radius: 8px; text-align: center; }
+#vote-panel { background-color: #fff3cd; border: 1px solid #ffeeba; }
+#char-choice-panel { background-color: #d4edda; border: 1px solid #c3e6cb; }
+#vote-panel button, .char-choice-btn { padding: 8px 15px; margin: 0 10px; border-radius: 5px; border: 1px solid #ccc; cursor: pointer; }
+#vote-valid { background-color: #d4edda; }
+#vote-invalid { background-color: #f8d7da; }
+#char-buttons { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: 10px; }
+.char-choice-btn { font-size: 1.2em; width: 40px; height: 40px; background-color: #fff; transition: background-color 0.2s, transform 0.2s; }
+.char-choice-btn:hover { background-color: #007bff; color: white; transform: scale(1.1); }
+/* 【核心修改】移除队列撤回按钮样式，只保留表单撤回按钮 */
+.withdraw-form-btn {
+    background-color: #ffc107;
+    border-color: #ffc107;
+}
+.withdraw-form-btn:hover {
+    background-color: #e0a800;
+}

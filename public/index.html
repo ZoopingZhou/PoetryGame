@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>古诗词接龙</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+    <!-- (大厅, 游戏左侧面板, 房间未找到, 昵称模态框等视图保持不变) -->
+    <div id="lobby-container">
+        <h1>古诗词游戏大厅</h1>
+        <div class="lobby-main">
+            <div class="room-list-panel">
+                <h2>房间列表</h2>
+                <ul id="room-list">
+                    <li class="no-rooms">正在加载房间列表...</li>
+                </ul>
+            </div>
+            <div class="create-room-panel">
+                <h2>没有心仪的房间？</h2>
+                <button id="create-room-btn" class="create-btn">立即创建新房间</button>
+            </div>
+        </div>
+    </div>
+    <div id="game-container">
+        <div id="left-panel">
+            <div id="game-info">
+                <button id="leave-room-btn" class="leave-btn">退出房间</button>
+                <p>当前房间: <strong id="room-name-display"></strong></p>
+                <p>当前起始字: <strong id="start-char">?</strong></p>
+                <p>游戏状态: <span id="game-state">连接中...</span></p>
+            </div>
+            <div id="score-container">
+                <h3>🏆 分数榜</h3>
+                <ul id="score-board"></ul>
+            </div>
+            <div id="queue-container">
+                <h3>⌛️ 等待验证</h3>
+                <ul id="queue-list"></ul>
+            </div>
+        </div>
+        <div id="right-panel">
+            <ul id="messages"></ul>
+            <div id="char-choice-panel" style="display: none;">
+                <h4>恭喜！请选择下一个起始字：</h4>
+                <div id="char-buttons"></div>
+            </div>
+            <div id="vote-panel" style="display: none;">
+                <div class="vote-content">
+                    <h4>对 [ <span id="vote-answer"></span> ] 进行投票：</h4>
+                    <p>剩余时间: <span id="vote-timer"></span> 秒</p>
+                    <div class="button-group">
+                        <button id="vote-valid">✅ 合法</button>
+                        <button id="vote-invalid">❌ 不合法</button>
+                    </div>
+                </div>
+                <div class="vote-waiting" style="display: none;">
+                    <p>等待其他玩家对 [<strong></strong>] 进行投票...</p>
+                </div>
+            </div>
+            <!-- 【核心修改】修改输入表单结构 -->
+            <form id="form">
+                <input id="input" autocomplete="off" placeholder="请输入诗句..."/>
+                <button id="submit-answer-btn" type="submit">发送</button>
+                <button id="withdraw-answer-btn" type="button" class="withdraw-form-btn" style="display: none;">撤回</button>
+            </form>
+        </div>
+    </div>
+    <div id="room-not-found-container">
+        <div class="panel">
+            <h2>房间不存在</h2>
+            <p>你访问的房间 <strong id="invalid-room-id"></strong> 不存在或已解散。</p>
+            <div class="button-group">
+                <button id="go-to-lobby-btn">返回大厅</button>
+                <button id="create-this-room-btn">创建这个房间</button>
+            </div>
+        </div>
+    </div>
+    <div id="nickname-modal">
+        <div id="modal-overlay"></div>
+        <div id="modal-content">
+            <h2 id="nickname-prompt-title">加入房间</h2>
+            <form id="nickname-form">
+                <input id="nickname-input" type="text" autocomplete="off" maxlength="10" required
+                    placeholder="请输入你的昵称" />
+                <div class="button-group">
+                    <button id="cancel-nickname-btn" type="button" class="cancel-btn">取消</button>
+                    <button type="submit">确认</button>
+                </div>
+            </form>
+            <p id="nickname-error" class="error-message"></p>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="/client.js"></script>
+</body>
+</html>
