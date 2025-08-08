@@ -38,6 +38,7 @@ const gameElements = {
     votePanel: document.getElementById('vote-panel'),
     charChoicePanel: document.getElementById('char-choice-panel'),
     charButtonsContainer: document.getElementById('char-buttons'),
+    globalToast: document.getElementById('global-toast'),
 };
 
 // --- 客户端状态变量 ---
@@ -47,9 +48,18 @@ let targetRoomName = null;
 let voteTimerInterval = null;
 let choiceTimerInterval = null;
 let myNickname = null;
+let toastTimeout = null;
+
+function resetClientState() {
+    currentAction = null;
+    targetRoomId = null;
+    targetRoomName = null;
+    myNickname = null;
+    clearSession();
+}
 
 // ======================================================
-// ========= 视图管理器和路由器 (Router) ================
+// ========= 视图与UI工具函数 ===========================
 // ======================================================
 function showView(viewName) {
     for (const key in views) {
@@ -64,8 +74,23 @@ function showView(viewName) {
             views[viewName].style.display = 'block';
         }
     }
+    // 每次切换视图都重新计算布局
+    adaptLayout();
+    setGameContainerHeight();
 }
 
+function showGlobalToast(message) {
+    clearTimeout(toastTimeout);
+    gameElements.globalToast.textContent = message;
+    gameElements.globalToast.classList.add('show');
+    toastTimeout = setTimeout(() => {
+        gameElements.globalToast.classList.remove('show');
+    }, 3000);
+}
+
+// ======================================================
+// ========= 路由器 (Router) ============================
+// ======================================================
 function handleRouting() {
     const path = window.location.pathname;
     const match = path.match(/^\/room\/([a-zA-Z0-9]+)$/);
@@ -80,7 +105,6 @@ function handleRouting() {
             socket.emit('validateRoom', roomId);
         }
     } else {
-        clearSession();
         showView('lobby');
         socket.emit('getRooms');
     }
@@ -108,17 +132,22 @@ function clearSession() {
 // ========= 统一的UI渲染函数 ==========================
 // ======================================================
 function renderGame(state) {
-    // 渲染聊天记录
+    if (state.players && myNickname && !state.players[myNickname]) {
+        resetClientState();
+        history.pushState(null, '', '/');
+        handleRouting();
+        showGlobalToast('您已离开房间或被移出');
+        return;
+    }
+    
     gameElements.messages.innerHTML = '';
     if (state.messages) {
         state.messages.forEach(msg => {
             appendMessage(msg);
         });
     }
-    // 滚动到底部
     gameElements.messages.scrollTop = gameElements.messages.scrollHeight;
 
-    // 渲染分数榜
     gameElements.scoreBoard.innerHTML = '';
     if (state.players) {
         for (const [playerId, playerData] of Object.entries(state.players)) {
@@ -133,11 +162,9 @@ function renderGame(state) {
         }
     }
 
-    // 更新游戏信息
     gameElements.startCharSpan.textContent = state.currentStartChar || '?';
     gameElements.gameStateSpan.textContent = state.gameStateMessage || '连接中...';
 
-    // 渲染等待队列
     const queue = state.queue || [];
     gameElements.queueList.innerHTML = '';
     queue.forEach((submission) => {
@@ -146,23 +173,21 @@ function renderGame(state) {
         gameElements.queueList.appendChild(li);
     });
 
-    // 更新输入框状态
     const hasSubmittedAnswer = queue.some(sub => sub.nickname === myNickname);
     if (state.isChoosingChar) {
         gameElements.input.disabled = true;
-        gameElements.input.value = ''; // 清空输入框
+        gameElements.input.value = '';
         gameElements.input.placeholder = '等待胜利者选择新字...';
         gameElements.submitAnswerBtn.style.display = 'block';
         gameElements.withdrawAnswerBtn.style.display = 'none';
     } else if (!state.playable) {
         gameElements.input.disabled = true;
-        gameElements.input.value = ''; // 清空输入框
+        gameElements.input.value = '';
         gameElements.input.placeholder = '等待更多玩家加入...';
         gameElements.submitAnswerBtn.style.display = 'block';
         gameElements.withdrawAnswerBtn.style.display = 'none';
     } else if (hasSubmittedAnswer) {
         gameElements.input.disabled = true;
-        // 注意：这里不清空，因为玩家可能想看到自己提交了什么
         gameElements.input.placeholder = '你已提交答案，等待或撤回...';
         gameElements.submitAnswerBtn.style.display = 'none';
         gameElements.withdrawAnswerBtn.style.display = 'block';
@@ -173,9 +198,7 @@ function renderGame(state) {
         gameElements.withdrawAnswerBtn.style.display = 'none';
     }
 
-    // 渲染投票面板
     const votePanel = gameElements.votePanel;
-    // 每次渲染前，都先清除旧的计时器，以防残留
     clearInterval(voteTimerInterval);
     clearInterval(choiceTimerInterval);
 
@@ -209,13 +232,11 @@ function renderGame(state) {
                 socket.emit('submitVote', 'invalid');
             });
         } else {
-            // 新加入的玩家，没有投票权
             voteContent.style.display = 'none';
             voteWaiting.style.display = 'block';
             voteWaiting.innerHTML = `<p>正在对 [<strong>${submission.answer}</strong>] 进行投票，请等待本轮结束...</p>`;
         }
         
-        // 如果有截止时间，则启动UI倒计时
         if (state.currentVote.endTime) {
             const voteTimerSpan = votePanel.querySelector('#vote-timer');
             const updateTimer = () => {
@@ -225,7 +246,7 @@ function renderGame(state) {
                     clearInterval(voteTimerInterval);
                 }
             };
-            updateTimer(); // 立即执行一次以显示初始时间
+            updateTimer();
             voteTimerInterval = setInterval(updateTimer, 1000);
         }
         votePanel.style.display = 'block';
@@ -233,9 +254,7 @@ function renderGame(state) {
         votePanel.style.display = 'none';
     }
 
-    // 渲染选字面板
     const choicePanel = gameElements.charChoicePanel;
-
     if (state.choice && state.choice.winnerNickname === myNickname) {
         gameElements.charButtonsContainer.innerHTML = '';
         const uniqueChars = [...new Set(state.choice.answer.replace(/[\s\p{P}]/gu, ''))];
@@ -249,7 +268,6 @@ function renderGame(state) {
             gameElements.charButtonsContainer.appendChild(button);
         });
 
-        // 如果有截止时间，则启动UI倒计时
         if (state.choice.endTime) {
             const choiceTimerSpan = document.getElementById('choice-timer');
             const updateTimer = () => {
@@ -259,7 +277,7 @@ function renderGame(state) {
                     clearInterval(choiceTimerInterval);
                 }
             };
-            updateTimer(); // 立即执行一次以显示初始时间
+            updateTimer();
             choiceTimerInterval = setInterval(updateTimer, 1000);
         }
         choicePanel.style.display = 'block';
@@ -268,13 +286,13 @@ function renderGame(state) {
     }
 }
 
-
 // ======================================================
 // ========= 事件监听器绑定 ============================
 // ======================================================
 lobbyElements.createRoomBtn.addEventListener('click', () => {
     currentAction = 'create_random';
     nicknameElements.title.textContent = '创建新房间';
+    nicknameElements.error.textContent = ''; 
     showView('nickname');
     nicknameElements.input.focus();
 });
@@ -313,7 +331,7 @@ roomNotFoundElements.createThisRoomBtn.addEventListener('click', () => {
 
 gameElements.leaveBtn.addEventListener('click', () => {
     socket.emit('leaveRoom');
-    clearSession();
+    resetClientState();
     history.pushState(null, '', '/');
     handleRouting();
 });
@@ -356,6 +374,7 @@ socket.on('roomListUpdate', (rooms) => {
                 currentAction = 'join';
                 targetRoomId = room.id;
                 nicknameElements.title.textContent = `加入房间: ${room.name}`;
+                nicknameElements.error.textContent = '';
                 showView('nickname');
                 nicknameElements.input.focus();
             });
@@ -369,11 +388,10 @@ socket.on('roomListUpdate', (rooms) => {
 
 socket.on('roomValidationResult', ({ exists, roomName, roomId }) => {
     if (exists) {
-        showView('game');
-        gameElements.roomNameDisplay.textContent = roomName;
         currentAction = 'join';
         targetRoomId = roomId;
         nicknameElements.title.textContent = `加入房间: ${roomName}`;
+        nicknameElements.error.textContent = '';
         showView('nickname');
         nicknameElements.input.focus();
     } else {
@@ -404,7 +422,7 @@ socket.on('reconnectError', (errorMsg) => {
     if (session) {
         roomNotFoundElements.invalidRoomId.textContent = session.roomId;
     }
-    clearSession();
+    resetClientState();
     showView('roomNotFound');
 });
 
@@ -420,11 +438,91 @@ socket.on('newMessage', (msg) => {
     appendMessage(msg);
 });
 
-// 收到完整的游戏状态时，重新渲染整个UI
 socket.on('gameStateUpdate', (state) => {
     renderGame(state);
 });
 
-// --- 初始加载时执行路由 ---
-document.addEventListener('DOMContentLoaded', handleRouting);
+function handleForcedExit(reason) {
+    if (views.game.style.display !== 'flex') return;
+    resetClientState();
+    history.pushState(null, '', '/');
+    handleRouting();
+    showGlobalToast(reason);
+    socket.disconnect().connect();
+}
+
+socket.on('kicked', (reason) => {
+    handleForcedExit(reason);
+});
+
+socket.on('roomClosed', (reason) => {
+    handleForcedExit(reason);
+});
+
+socket.on('disconnect', (reason) => {
+    if (views.game.style.display === 'flex') {
+        handleForcedExit('与服务器的连接已断开');
+    }
+});
+
+// ======================================================
+// ========= 布局与尺寸适配 ============================
+// ======================================================
+
+// --- 拖动分割线实现 (仅桌面端) ---
+const leftPanel = document.getElementById('left-panel');
+const resizer = document.getElementById('resizer');
+let isResizing = false;
+
+if (resizer) {
+    resizer.addEventListener('mousedown', function(e) {
+        isResizing = true;
+        document.body.style.cursor = 'ew-resize';
+        document.body.style.userSelect = 'none';
+    });
+
+    document.addEventListener('mousemove', function(e) {
+        if (!isResizing) return;
+        const minWidth = 160;
+        const maxWidth = 460;
+        let newWidth = e.clientX;
+        if (newWidth < minWidth) newWidth = minWidth;
+        if (newWidth > maxWidth) newWidth = maxWidth;
+        leftPanel.style.width = newWidth + 'px';
+    });
+
+    document.addEventListener('mouseup', function() {
+        if (isResizing) {
+            isResizing = false;
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+        }
+    });
+}
+
+// --- 动态设置容器高度以适配移动端 ---
+const gameContainer = document.getElementById('game-container');
+function setGameContainerHeight() {
+    if (gameContainer) {
+        gameContainer.style.height = window.innerHeight + 'px';
+    }
+}
+
+// --- 移动端布局适配 ---
+function adaptLayout() {
+    const isMobile = window.matchMedia("(max-width: 768px)").matches;
+    document.body.classList.toggle('mobile-layout', isMobile);
+}
+
+// --- 初始加载与事件监听 ---
+document.addEventListener('DOMContentLoaded', () => {
+    handleRouting();
+    setGameContainerHeight();
+    adaptLayout();
+});
 window.addEventListener('popstate', handleRouting);
+window.addEventListener('resize', () => {
+    setGameContainerHeight();
+    adaptLayout();
+});
+window.addEventListener('orientationchange', setGameContainerHeight);
