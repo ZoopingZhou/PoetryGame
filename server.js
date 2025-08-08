@@ -7,7 +7,6 @@ const fs = require('fs').promises;
 const bodyParser = require('body-parser');
 const cookieParser = require('cookie-parser');
 const session = require('express-session');
-const readline = require('readline');
 
 const app = express();
 const server = http.createServer(app);
@@ -409,6 +408,11 @@ function handlePlayerDisconnect(socket, { graceful = false }) {
 
     const room = rooms[roomId];
     const player = room.players[nickname];
+    // 关键修复：在尝试访问 room.players 之前，检查 room 是否存在
+    if (!room) {
+        return; // 房间已不存在，无需任何操作
+    }
+
     if (!player) return;
 
     if (graceful) {
@@ -821,39 +825,21 @@ function startNewRound(roomId, newChar, chooserId) {
     broadcastGameState(roomId);
 }
 
-async function setupAdmin() {
+async function loadAdminConfig() {
     try {
         const adminData = await fs.readFile(ADMIN_FILE, 'utf8');
         adminConfig = JSON.parse(adminData);
+        console.log('管理员配置已加载。');
     } catch (error) {
-        if (error.code === 'ENOENT') {
-            console.log('未找到管理员配置文件。请设置管理员密码:');
-            const rl = readline.createInterface({
-                input: process.stdin,
-                output: process.stdout
-            });
-            rl.question('请输入新密码: ', async (password) => {
-                if (password) {
-                    const salt = crypto.randomBytes(16).toString('hex');
-                    const hash = hashPassword(password, salt);
-                    adminConfig = { salt, hash };
-                    await fs.writeFile(ADMIN_FILE, JSON.stringify(adminConfig, null, 2));
-                    console.log('管理员密码已设置并保存。');
-                } else {
-                    console.log('密码不能为空，服务器将以无管理员权限模式运行。');
-                }
-                rl.close();
-            });
-        } else {
-            console.error('加载管理员配置失败:', error);
-        }
+        console.error('错误：管理员配置文件 (data/admin.json) 未找到或无法读取。');
+        console.error('请先运行 "node setup.js" 来设置管理员密码。');
     }
 }
 
 
 (async function loadData() {
     try {
-        await setupAdmin();
+        await loadAdminConfig();
         await fs.mkdir(DATA_DIR, { recursive: true });
         try {
             const roomsData = await fs.readFile(ROOMS_FILE, 'utf8');
