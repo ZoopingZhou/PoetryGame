@@ -46,6 +46,11 @@ h1, h3 { color: #333; border-bottom: 2px solid #eee; padding-bottom: 10px; }
 #messages li { padding: 8px 12px; margin-bottom: 8px; border-radius: 8px; background: #e9e9eb; max-width: 80%; word-wrap: break-word; }
 #messages li.game-message { background-color: #d1ecf1; color: #0c5460; text-align: center; max-width: 100%; font-style: italic; }
 #form { display: flex; padding: 20px; background-color: #fff; border-top: 1px solid #ddd; }
+#messages li.private-message {
+    background-color: #e9ecef;
+    color: #495057;
+    font-style: italic;
+}
 #input { border: 1px solid #ccc; padding: 10px; width: 100%; margin-right: 10px; border-radius: 5px; }
 #form button { border: none; padding: 10px 20px; color: white; border-radius: 5px; cursor: pointer; }
 #submit-answer-btn { background: #007bff; }

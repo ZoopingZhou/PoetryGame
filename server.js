@@ -17,6 +17,7 @@ let rooms = {};
 let localCache = [];
 let reconnectTimeouts = {};
 let choiceTimeouts = {};
+const RECONNECT_TIMEOUT_MS = 30000;
 
 let saveRoomsTimeout = null;
 let saveCacheTimeout = null;
@@ -38,9 +39,6 @@ function getLobbyInfo() {
     return roomList;
 }
 
-// ======================================================
-// 【关键修复】: 恢复被意外删除的 broadcastRoomList 函数
-// ======================================================
 function broadcastRoomList() {
     io.to('lobby').emit('roomListUpdate', getLobbyInfo());
 }
@@ -116,7 +114,7 @@ function broadcastMessage(roomId, messageContent, messageClass = 'game-message')
 
     const message = {
         content: messageContent,
-        class: messageClass,
+        className: messageClass,
         timestamp: Date.now(),
     };
     
@@ -124,6 +122,22 @@ function broadcastMessage(roomId, messageContent, messageClass = 'game-message')
     if (room.messages.length > 50) room.messages.shift(); // 限制消息历史长度
     io.to(roomId).emit('newMessage', message);
 }
+
+function removePlayerFromRoom(roomId, nickname) {
+    const room = rooms[roomId];
+    if (!room || !room.players[nickname]) return false;
+
+    delete room.players[nickname];
+    delete reconnectTimeouts[nickname];
+
+    if (Object.keys(room.players).length === 0) {
+        console.log(`房间 [${roomId}] 因无人而销毁。`);
+        delete rooms[roomId];
+        return true;
+    }
+    return false;
+}
+
 
 app.use(express.static(path.join(__dirname, 'public')));
 app.get('/room/:roomId', (req, res) => {
@@ -244,7 +258,7 @@ function handlePlayerDisconnect(socket, { graceful = false }) {
 
     if (graceful) {
         broadcastMessage(roomId, `--- 玩家【${player.nickname}】离开了房间 ---`);
-        delete room.players[nickname];
+        removePlayerFromRoom(roomId, nickname);
     } else {
         player.online = false;
         player.disconnectTime = Date.now();
@@ -258,19 +272,14 @@ function handlePlayerDisconnect(socket, { graceful = false }) {
                 console.log(
                     `玩家【${player.nickname}】重连超时，已从房间 [${roomId}] 移除。`
                 );
-                delete rooms[roomId].players[nickname];
-                delete reconnectTimeouts[nickname];
-                if (Object.keys(room.players).length === 0) {
-                    delete rooms[roomId];
-                    console.log(`房间 [${roomId}] 已被销毁。`);
-                } else {
+                if (!removePlayerFromRoom(roomId, nickname)) {
                     broadcastMessage(roomId, `--- 玩家【${player.nickname}】已掉线 ---`);
                     broadcastGameState(roomId);
                 }
                 scheduleSaveRooms();
                 broadcastRoomList();
             }
-        }, 30000);
+        }, RECONNECT_TIMEOUT_MS);
     }
 
     socket.leave(roomId);
@@ -286,13 +295,9 @@ function handlePlayerDisconnect(socket, { graceful = false }) {
         }
     }
 
-    if (Object.keys(room.players).length === 0) {
-        delete rooms[roomId];
-        console.log(`房间 [${roomId}] 因无人而销毁。`);
-    } else {
+    if (rooms[roomId]) {
         broadcastGameState(roomId);
     }
-
     scheduleSaveRooms();
     broadcastRoomList();
 }
@@ -404,7 +409,6 @@ function scheduleSaveRooms() {
                         votes: rooms[roomId].currentVote.votes,
                         voters: rooms[roomId].currentVote.voters,
                         endTime: rooms[roomId].currentVote.endTime,
-                        messages: rooms[roomId].messages,
                     } : null,
                 };
             }
@@ -654,9 +658,8 @@ function startNewRound(roomId, newChar, chooserId) {
         try {
             const roomsData = await fs.readFile(ROOMS_FILE, 'utf8');
             rooms = JSON.parse(roomsData);
-            const RECONNECT_TIMEOUT_MS = 30000;
 
-            // 在加载时，确保所有玩家都是离线状态，因为 socketId 已经失效
+            // 在加载时，处理所有离线玩家的重连计时器
             for (const roomId in rooms) {
                 if (!rooms[roomId].messages) rooms[roomId].messages = []; // 兼容旧数据
                 for (const nickname in rooms[roomId].players) {
@@ -667,26 +670,27 @@ function startNewRound(roomId, newChar, chooserId) {
                         const offlineDuration = Date.now() - player.disconnectTime;
                         if (offlineDuration >= RECONNECT_TIMEOUT_MS) {
                             console.log(`玩家【${nickname}】在服务器重启后因超时被移除。`);
-                            delete rooms[roomId].players[nickname];
+                            removePlayerFromRoom(roomId, nickname);
                         } else {
                             const remainingTime = RECONNECT_TIMEOUT_MS - offlineDuration;
                             reconnectTimeouts[nickname] = setTimeout(() => {
                                 if (rooms[roomId]?.players[nickname] && !rooms[roomId].players[nickname].online) {
                                     console.log(`玩家【${nickname}】重连超时，已从房间 [${roomId}] 移除。`);
-                                    delete rooms[roomId].players[nickname];
-                                    delete reconnectTimeouts[nickname];
-                                    broadcastMessage(roomId, `--- 玩家【${nickname}】已掉线 ---`);
-                                    broadcastGameState(roomId);
+                                    if (!removePlayerFromRoom(roomId, nickname)) {
+                                        broadcastMessage(roomId, `--- 玩家【${nickname}】已掉线 ---`);
+                                        broadcastGameState(roomId);
+                                    }
                                     broadcastRoomList();
                                 }
                             }, remainingTime);
                         }
                     }
                 }
+                if (!rooms[roomId]) continue;
             }
             console.log('房间数据已成功加载。');
         } catch (error) {
-            console.log('未找到 rooms.json，将使用空房间列表。');
+            console.log('未找到 rooms.json，将使用空房间列表。', error.message);
             rooms = {};
         }
         try {
@@ -695,7 +699,7 @@ function startNewRound(roomId, newChar, chooserId) {
             localCache = Array.isArray(parsedCache) ? parsedCache : [];
             console.log('有效诗句缓存已成功加载。');
         } catch (error) {
-            console.log(`未找到 ${VALID_SENTENCES_FILE}，将使用空缓存。`);
+            console.log(`未找到 ${VALID_SENTENCES_FILE}，将使用空缓存。`, error.message);
             localCache = [];
         }
     } catch (error) {
