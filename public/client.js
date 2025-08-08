@@ -138,13 +138,21 @@ function renderGame(state) {
 
     // 更新输入框状态
     const hasSubmittedAnswer = queue.some(sub => sub.nickname === myNickname);
-    if (!state.playable) {
+    if (state.isChoosingChar) {
         gameElements.input.disabled = true;
+        gameElements.input.value = ''; // 清空输入框
+        gameElements.input.placeholder = '等待胜利者选择新字...';
+        gameElements.submitAnswerBtn.style.display = 'block';
+        gameElements.withdrawAnswerBtn.style.display = 'none';
+    } else if (!state.playable) {
+        gameElements.input.disabled = true;
+        gameElements.input.value = ''; // 清空输入框
         gameElements.input.placeholder = '等待更多玩家加入...';
         gameElements.submitAnswerBtn.style.display = 'block';
         gameElements.withdrawAnswerBtn.style.display = 'none';
     } else if (hasSubmittedAnswer) {
         gameElements.input.disabled = true;
+        // 注意：这里不清空，因为玩家可能想看到自己提交了什么
         gameElements.input.placeholder = '你已提交答案，等待或撤回...';
         gameElements.submitAnswerBtn.style.display = 'none';
         gameElements.withdrawAnswerBtn.style.display = 'block';

@@ -90,8 +90,10 @@ function getSerializableRoomState(roomId) {
             winnerId: choiceTimeouts[roomId].winnerId, 
             answer: choiceTimeouts[roomId].answer,
             endTime: choiceTimeouts[roomId].endTime,
-        } : null,
+        } : null, 
         playable: isPlayable,
+        // 明确的布尔标记，表示是否正处于选字阶段
+        isChoosingChar: !!choiceTimeouts[roomId],
         gameStateMessage: gameStateMessage,
     };
 }
