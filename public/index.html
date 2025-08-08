@@ -2,6 +2,8 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
+    <!-- 移动端自适应宽度，禁止缩放 -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>古诗词接龙</title>
     <link rel="stylesheet" href="/style.css">
     <style>
@@ -61,9 +63,9 @@
         <div id="left-panel">
             <div id="game-info">
                 <button id="leave-room-btn" class="leave-btn">退出房间</button>
-                <p>当前房间: <strong id="room-name-display"></strong></p>
-                <p>当前起始字: <strong id="start-char">?</strong></p>
-                <p>游戏状态: <span id="game-state">连接中...</span></p>
+                <h3>当前房间: <span id="room-name-display"></span></h3>
+                <h4>当前起始字: <span id="start-char">?</span></h4>
+                <h4>游戏状态: <span id="game-state">连接中...</span></h4>
             </div>
             <div id="score-container">
                 <h3>🏆 分数榜</h3>
@@ -134,36 +136,95 @@
     <script src="/socket.io/socket.io.js"></script>
     <script src="/client.js"></script>
     <script>
-        // 拖动分割线实现
+        // 拖动分割线实现（桌面端）
         const leftPanel = document.getElementById('left-panel');
         const resizer = document.getElementById('resizer');
         let isResizing = false;
 
-        resizer.addEventListener('mousedown', function(e) {
-            isResizing = true;
-            document.body.style.cursor = 'ew-resize';
-            // 防止拖动时选中文字
-            document.body.style.userSelect = 'none';
-        });
+        if (resizer) {
+            resizer.addEventListener('mousedown', function(e) {
+                isResizing = true;
+                document.body.style.cursor = 'ew-resize';
+                document.body.style.userSelect = 'none';
+            });
 
-        document.addEventListener('mousemove', function(e) {
-            if (!isResizing) return;
-            const minWidth = 160;
-            const maxWidth = 460;
-            let newWidth = e.clientX;
-            // 防止拖到页面外
-            if (newWidth < minWidth) newWidth = minWidth;
-            if (newWidth > maxWidth) newWidth = maxWidth;
-            leftPanel.style.width = newWidth + 'px';
-        });
+            document.addEventListener('mousemove', function(e) {
+                if (!isResizing) return;
+                const minWidth = 160;
+                const maxWidth = 460;
+                let newWidth = e.clientX;
+                if (newWidth < minWidth) newWidth = minWidth;
+                if (newWidth > maxWidth) newWidth = maxWidth;
+                leftPanel.style.width = newWidth + 'px';
+            });
 
-        document.addEventListener('mouseup', function() {
-            if (isResizing) {
-                isResizing = false;
-                document.body.style.cursor = '';
-                document.body.style.userSelect = '';
+            document.addEventListener('mouseup', function() {
+                if (isResizing) {
+                    isResizing = false;
+                    document.body.style.cursor = '';
+                    document.body.style.userSelect = '';
+                }
+            });
+        }
+
+        // 移动端适配：检测长宽比并调整布局
+        function adaptForMobile() {
+            const isMobile = window.innerWidth / window.innerHeight < 0.85;
+            const gameContainer = document.getElementById('game-container');
+            if (!gameContainer) return;
+            const leftPanel = document.getElementById('left-panel');
+            const resizer = document.getElementById('resizer');
+            const rightPanel = document.getElementById('right-panel');
+            if (isMobile) {
+                // 移动到顶部
+                if (leftPanel && rightPanel && leftPanel.parentNode !== gameContainer) {
+                    // 已经移动过
+                    return;
+                }
+                if (leftPanel && rightPanel) {
+                    gameContainer.insertBefore(leftPanel, rightPanel);
+                    if (resizer) resizer.style.display = 'none';
+                    leftPanel.style.width = '100%';
+                    leftPanel.style.maxWidth = '100vw';
+                    leftPanel.style.minWidth = '0';
+                    leftPanel.style.borderRight = 'none';
+                    leftPanel.style.borderBottom = '1px solid #ddd';
+                    leftPanel.style.boxShadow = '0 2px 8px rgba(0,0,0,0.04)';
+                    leftPanel.style.flexDirection = 'row';
+                    leftPanel.style.gap = '16px';
+                    leftPanel.style.padding = '10px 8px';
+                }
+                if (gameContainer) {
+                    gameContainer.style.flexDirection = 'column';
+                }
+                if (rightPanel) {
+                    rightPanel.style.flexGrow = '1';
+                }
+            } else {
+                // 恢复桌面端
+                if (leftPanel && rightPanel && leftPanel.parentNode === gameContainer) {
+                    if (resizer) resizer.style.display = '';
+                    leftPanel.style.width = '';
+                    leftPanel.style.maxWidth = '';
+                    leftPanel.style.minWidth = '';
+                    leftPanel.style.borderRight = '';
+                    leftPanel.style.borderBottom = '';
+                    leftPanel.style.boxShadow = '';
+                    leftPanel.style.flexDirection = '';
+                    leftPanel.style.gap = '';
+                    leftPanel.style.padding = '';
+                }
+                if (gameContainer) {
+                    gameContainer.style.flexDirection = '';
+                }
+                if (rightPanel) {
+                    rightPanel.style.flexGrow = '';
+                }
             }
-        });
+        }
+        window.addEventListener('resize', adaptForMobile);
+        window.addEventListener('orientationchange', adaptForMobile);
+        window.addEventListener('DOMContentLoaded', adaptForMobile);
     </script>
 </body>
 </html>
