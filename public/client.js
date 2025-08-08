@@ -74,6 +74,9 @@ function showView(viewName) {
             views[viewName].style.display = 'block';
         }
     }
+    // 每次切换视图都重新计算布局
+    adaptLayout();
+    setGameContainerHeight();
 }
 
 function showGlobalToast(message) {
@@ -440,12 +443,12 @@ socket.on('gameStateUpdate', (state) => {
 });
 
 function handleForcedExit(reason) {
-    if (views.game.style.display !== 'flex') return; // 避免在大厅重复触发
+    if (views.game.style.display !== 'flex') return;
     resetClientState();
     history.pushState(null, '', '/');
     handleRouting();
     showGlobalToast(reason);
-    socket.disconnect().connect(); // 强制重连以获取干净的会话
+    socket.disconnect().connect();
 }
 
 socket.on('kicked', (reason) => {
@@ -462,6 +465,64 @@ socket.on('disconnect', (reason) => {
     }
 });
 
-// --- 初始加载时执行路由 ---
-document.addEventListener('DOMContentLoaded', handleRouting);
+// ======================================================
+// ========= 布局与尺寸适配 ============================
+// ======================================================
+
+// --- 拖动分割线实现 (仅桌面端) ---
+const leftPanel = document.getElementById('left-panel');
+const resizer = document.getElementById('resizer');
+let isResizing = false;
+
+if (resizer) {
+    resizer.addEventListener('mousedown', function(e) {
+        isResizing = true;
+        document.body.style.cursor = 'ew-resize';
+        document.body.style.userSelect = 'none';
+    });
+
+    document.addEventListener('mousemove', function(e) {
+        if (!isResizing) return;
+        const minWidth = 160;
+        const maxWidth = 460;
+        let newWidth = e.clientX;
+        if (newWidth < minWidth) newWidth = minWidth;
+        if (newWidth > maxWidth) newWidth = maxWidth;
+        leftPanel.style.width = newWidth + 'px';
+    });
+
+    document.addEventListener('mouseup', function() {
+        if (isResizing) {
+            isResizing = false;
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+        }
+    });
+}
+
+// --- 动态设置容器高度以适配移动端 ---
+const gameContainer = document.getElementById('game-container');
+function setGameContainerHeight() {
+    if (gameContainer) {
+        gameContainer.style.height = window.innerHeight + 'px';
+    }
+}
+
+// --- 移动端布局适配 ---
+function adaptLayout() {
+    const isMobile = window.matchMedia("(max-width: 768px)").matches;
+    document.body.classList.toggle('mobile-layout', isMobile);
+}
+
+// --- 初始加载与事件监听 ---
+document.addEventListener('DOMContentLoaded', () => {
+    handleRouting();
+    setGameContainerHeight();
+    adaptLayout();
+});
 window.addEventListener('popstate', handleRouting);
+window.addEventListener('resize', () => {
+    setGameContainerHeight();
+    adaptLayout();
+});
+window.addEventListener('orientationchange', setGameContainerHeight);
