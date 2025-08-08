@@ -36,9 +36,9 @@ body {
 .button-group button { padding: 12px 25px; font-size: 1em; border-radius: 5px; border: 1px solid #ddd; cursor: pointer; }
 #go-to-lobby-btn, .cancel-btn { background-color: #6c757d; color: white; border-color: #6c757d; }
 #create-this-room-btn, #nickname-form button[type="submit"] { background-color: #007bff; color: white; border-color: #007bff; }
-#game-container { display: flex; height: 100vh; display: none; flex-direction: row; }
+#game-container { display: flex; display: none; flex-direction: row; } /* 移除 height: 100vh */
 #left-panel { width: 280px; background-color: #ffffff; padding: 20px; border-right: 1px solid #ddd; box-shadow: 0 0 10px rgba(0,0,0,0.05); display: flex; flex-direction: column; gap: 20px; transition: all 0.3s; }
-#resizer { width: 6px; cursor: ew-resize; background: #ddd; height: 100vh; z-index: 10; }
+#resizer { width: 6px; cursor: ew-resize; background: #ddd; z-index: 10; }
 .leave-btn { display: block; width: 100%; padding: 10px; margin-bottom: 20px; background-color: #dc3545; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 1em; }
 .leave-btn:hover { background-color: #c82333; }
 #right-panel { flex-grow: 1; display: flex; flex-direction: column; background-color: #f7f7f7; overflow: hidden; }

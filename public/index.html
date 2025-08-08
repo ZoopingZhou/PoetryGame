@@ -2,12 +2,45 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>古诗词接龙</title>
     <link rel="stylesheet" href="/style.css">
+    <style>
+        html, body {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            overflow: hidden; /* 确保页面本身不滚动 */
+        }
+        #game-container {
+            display: flex;
+            width: 100vw;
+        }
+        #left-panel {
+            width: 280px;
+            min-width: 160px;
+            max-width: 460px;
+            background: #f5f5f8;
+            box-sizing: border-box;
+            overflow-y: auto;
+            transition: background 0.2s;
+        }
+        #resizer {
+            width: 6px;
+            cursor: ew-resize;
+            background: #ddd;
+            height: 100%;
+            z-index: 10;
+        }
+        #right-panel {
+            flex: 1;
+            background: #fff;
+            overflow-y: auto;
+            box-sizing: border-box;
+        }
+    </style>
 </head>
 <body>
-    <!-- (大厅, 房间未找到, 昵称模态框等视图保持不变) -->
+    <!-- (大厅, 游戏左侧面板, 房间未找到, 昵称模态框等视图保持不变) -->
     <div id="lobby-container">
         <h1>古诗词游戏大厅</h1>
         <div class="lobby-main">
@@ -132,6 +165,15 @@
                 }
             });
         }
+
+        const gameContainer = document.getElementById('game-container');
+        function setGameContainerHeight() {
+            gameContainer.style.height = window.innerHeight + 'px';
+        }
+
+        window.addEventListener('resize', setGameContainerHeight);
+        window.addEventListener('orientationchange', setGameContainerHeight);
+        document.addEventListener('DOMContentLoaded', setGameContainerHeight);
 
         // --- 移动端适配 ---
         function adaptLayout() {
