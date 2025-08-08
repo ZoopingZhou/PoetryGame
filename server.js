@@ -7,6 +7,7 @@ const fs = require('fs').promises;
 const bodyParser = require('body-parser');
 const cookieParser = require('cookie-parser');
 const session = require('express-session');
+const readline = require('readline');
 
 const app = express();
 const server = http.createServer(app);
@@ -44,7 +45,9 @@ function getLobbyInfo() {
 }
 
 function broadcastRoomList() {
-    io.to('lobby').emit('roomListUpdate', getLobbyInfo());
+    const roomList = getLobbyInfo();
+    io.to('lobby').emit('roomListUpdate', roomList);
+    io.to('admin').emit('adminDataUpdate'); // 通知管理员界面更新
 }
 
 function getSerializableRoomState(roomId) {
@@ -67,7 +70,6 @@ function getSerializableRoomState(roomId) {
     }
 
     return {
-        // 构造一个不暴露 socketId 的 players 对象给客户端
         players: Object.fromEntries(
             Object.entries(room.players).map(([nickname, data]) => [
                 nickname,
@@ -88,7 +90,6 @@ function getSerializableRoomState(roomId) {
             endTime: choiceTimeouts[roomId].endTime,
         } : null, 
         playable: isPlayable,
-        // 明确的布尔标记，表示是否正处于选字阶段
         isChoosingChar: !!choiceTimeouts[roomId],
         gameStateMessage: gameStateMessage,
         messages: room.messages,
@@ -100,13 +101,14 @@ function broadcastGameState(roomId) {
     if (state) {
         io.to(roomId).emit('gameStateUpdate', state);
     }
+    io.to('admin').emit('adminDataUpdate'); // 玩家状态变化也通知管理员
 }
 
 function sendPrivateMessage(socket, messageContent) {
     if (!socket) return;
     const message = {
         content: messageContent,
-        className: 'private-message', // 为私有消息指定一个特殊的类名
+        className: 'private-message',
         timestamp: Date.now(),
     };
     socket.emit('newMessage', message);
@@ -123,7 +125,7 @@ function broadcastMessage(roomId, messageContent, messageClass = 'game-message')
     };
     
     room.messages.push(message);
-    if (room.messages.length > 50) room.messages.shift(); // 限制消息历史长度
+    if (room.messages.length > 50) room.messages.shift();
     io.to(roomId).emit('newMessage', message);
 }
 
@@ -143,10 +145,10 @@ async function verifyPassword(password, salt, hash) {
 app.use(cookieParser());
 app.use(bodyParser.json());
 app.use(session({
-    secret: crypto.randomBytes(32).toString('hex'), // 随机生成secret
+    secret: crypto.randomBytes(32).toString('hex'),
     resave: false,
     saveUninitialized: true,
-    cookie: { secure: false } // 在生产环境中应设为 true (需要HTTPS)
+    cookie: { secure: false }
 }));
 
 const authMiddleware = (req, res, next) => {
@@ -218,26 +220,20 @@ adminApiRouter.post('/rooms/toggle-permanent', (req, res) => {
     }
 });
 
-adminApiRouter.post('/rooms/players/delete', (req, res) => {
-    const { roomId, nickname } = req.body;
-    const room = rooms[roomId];
-    if (room && room.players[nickname]) {
-        // 管理员移除玩家，无论是否永久房间都直接移除
-        const player = room.players[nickname];
-        if (player.online && io.sockets.sockets.get(player.socketId)) {
-            io.sockets.sockets.get(player.socketId).disconnect();
-        }
-        removePlayerFromRoom(roomId, nickname);
-        broadcastGameState(roomId);
-        res.json({ success: true });
-    } else {
-        res.status(404).json({ message: '玩家或房间不存在' });
-    }
-});
-
 adminApiRouter.post('/rooms/delete', (req, res) => {
     const { roomId } = req.body;
     if (rooms[roomId]) {
+        io.to(roomId).emit('roomClosed', '房间已被管理员解散');
+        
+        Object.values(rooms[roomId].players).forEach(player => {
+            if (player.online && io.sockets.sockets.get(player.socketId)) {
+                setTimeout(() => {
+                    const socket = io.sockets.sockets.get(player.socketId);
+                    if (socket) socket.disconnect(true);
+                }, 50);
+            }
+        });
+
         delete rooms[roomId];
         broadcastRoomList();
         res.json({ success: true });
@@ -273,8 +269,35 @@ adminApiRouter.post('/cache/delete', (req, res) => {
     }
 });
 
-app.use('/admin/api', adminApiRouter);
+adminApiRouter.post('/rooms/players/delete', (req, res) => {
+    const { roomId, nickname } = req.body;
+    const room = rooms[roomId];
+    if (room && room.players[nickname]) {
+        const player = room.players[nickname];
 
+        // 1. 如果玩家在线，通知并断开连接
+        if (player.online && io.sockets.sockets.get(player.socketId)) {
+            const targetSocket = io.sockets.sockets.get(player.socketId);
+            targetSocket.emit('kicked', '您已被管理员移出房间');
+            setTimeout(() => {
+                if (targetSocket) targetSocket.disconnect(true);
+            }, 50);
+        }
+
+        // 2. 无论在线与否，都直接、无条件地从数据中移除
+        removePlayerFromRoom(roomId, nickname);
+
+        // 3. 广播状态更新
+        broadcastGameState(roomId); // 更新房间内其他玩家的视图
+        broadcastRoomList();      // 更新大厅和管理员界面的玩家计数
+
+        res.json({ success: true });
+    } else {
+        res.status(404).json({ message: '玩家或房间不存在' });
+    }
+});
+
+app.use('/admin/api', adminApiRouter);
 
 function removePlayerFromRoom(roomId, nickname) {
     const room = rooms[roomId];
@@ -291,7 +314,6 @@ function removePlayerFromRoom(roomId, nickname) {
     return false;
 }
 
-
 app.use(express.static(path.join(__dirname, 'public')));
 app.get('/room/:roomId', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
@@ -299,9 +321,13 @@ app.get('/room/:roomId', (req, res) => {
 
 io.on('connection', (socket) => {
     console.log(`一位玩家已连接: ${socket.id}`);
+    
+    socket.on('joinAdmin', () => {
+        socket.join('admin');
+    });
+
     socket.join('lobby');
 
-    // 在 socket 连接对象上附加一个查找函数，方便后续使用
     socket.getPlayerInfo = function() {
         if (!this.roomId || !this.nickname) return null;
         return rooms[this.roomId]?.players[this.nickname];
@@ -407,16 +433,14 @@ function handlePlayerDisconnect(socket, { graceful = false }) {
     if (!roomId || !nickname) return;
 
     const room = rooms[roomId];
-    const player = room.players[nickname];
-    // 关键修复：在尝试访问 room.players 之前，检查 room 是否存在
     if (!room) {
-        return; // 房间已不存在，无需任何操作
+        return;
     }
 
+    const player = room.players[nickname];
     if (!player) return;
 
     if (graceful) {
-        // 如果是永久房间，玩家主动退出只标记为离线
         if (room.isPermanent) {
             player.online = false;
             player.disconnectTime = Date.now();
@@ -430,8 +454,8 @@ function handlePlayerDisconnect(socket, { graceful = false }) {
         player.disconnectTime = Date.now();
         broadcastMessage(roomId, `--- 玩家【${player.nickname}】已断开连接，等待重连... ---`);
 
-        // 只有非永久房间的玩家才会启动超时计时器
         if (room.isPermanent) {
+            broadcastGameState(roomId);
             return;
         }
 
@@ -494,7 +518,6 @@ function joinRoom(socket, roomId, nickname) {
     } else {
         socket.leave('lobby');
         socket.join(roomId);
-        // 附加身份信息到 socket
         socket.roomId = roomId;
         socket.nickname = nickname;
 
@@ -529,7 +552,6 @@ function reconnectPlayer(socket, roomId, nickname) {
 
         socket.leave('lobby');
         socket.join(roomId);
-        // 附加身份信息到 socket
         socket.roomId = roomId;
         socket.nickname = nickname;
 
@@ -567,7 +589,6 @@ function scheduleSaveRooms() {
                     id: rooms[roomId].id,
                     name: rooms[roomId].name,
                     isPermanent: rooms[roomId].isPermanent,
-                    // 保存时，擦除临时的 socketId
                     players: Object.fromEntries(
                         Object.entries(rooms[roomId].players).map(([nick, data]) => [
                             nick,
@@ -577,6 +598,7 @@ function scheduleSaveRooms() {
                     currentStartChar: rooms[roomId].currentStartChar,
                     usedSentences: rooms[roomId].usedSentences,
                     validationQueue: rooms[roomId].validationQueue,
+                    messages: rooms[roomId].messages,
                     currentVote: rooms[roomId].currentVote ? {
                         submission: rooms[roomId].currentVote.submission,
                         votes: rooms[roomId].currentVote.votes,
@@ -683,7 +705,6 @@ function handleCorrectAnswer(roomId, submission) {
         endTime: choiceEndTime,
         timer: setTimeout(() => {
             if (choiceTimeouts[roomId]) {
-                // 超时后，删除状态并由系统开启新一轮
                 const timeoutWinnerNickname = choiceTimeouts[roomId].winnerNickname;
                 delete choiceTimeouts[roomId]; 
                 broadcastMessage(roomId, `玩家【${timeoutWinnerNickname}】选择超时，系统将自动选择。`);
@@ -819,7 +840,7 @@ function startNewRound(roomId, newChar, chooserId) {
     room.currentStartChar = newChar;
     const chooserNickname =
         chooserId === '系统'
-            ? '系统' // chooserId is a nickname or '系统'
+            ? '系统'
             : chooserId;
     broadcastMessage(roomId, `🎉 ${chooserNickname} 指定新起始字为【${newChar}】。新一轮开始！`);
     broadcastGameState(roomId);
@@ -833,6 +854,7 @@ async function loadAdminConfig() {
     } catch (error) {
         console.error('错误：管理员配置文件 (data/admin.json) 未找到或无法读取。');
         console.error('请先运行 "node setup.js" 来设置管理员密码。');
+        process.exit(1);
     }
 }
 
@@ -845,15 +867,13 @@ async function loadAdminConfig() {
             const roomsData = await fs.readFile(ROOMS_FILE, 'utf8');
             rooms = JSON.parse(roomsData);
 
-            // 在加载时，处理所有离线玩家的重连计时器
             for (const roomId in rooms) {
-                if (!rooms[roomId].messages) rooms[roomId].messages = []; // 兼容旧数据
+                if (!rooms[roomId].messages) rooms[roomId].messages = [];
                 for (const nickname in rooms[roomId].players) {
                     const player = rooms[roomId].players[nickname];
                     player.online = false;
 
                     if (player.disconnectTime) {
-                        // 如果是永久房间，则跳过该玩家的超时处理
                         if (rooms[roomId].isPermanent) {
                             continue;
                         }

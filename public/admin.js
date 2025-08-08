@@ -1,4 +1,6 @@
 document.addEventListener('DOMContentLoaded', () => {
+    const socket = io();
+
     const loginView = document.getElementById('login-view');
     const dashboardView = document.getElementById('dashboard-view');
     const loginForm = document.getElementById('login-form');
@@ -10,6 +12,21 @@ document.addEventListener('DOMContentLoaded', () => {
     const playerListBody = document.getElementById('player-list-body');
     const closeModalBtn = playerModal.querySelector('.close-btn');
 
+    // --- Socket.IO 连接 ---
+    socket.on('connect', () => {
+        console.log('已连接到服务器');
+        // 如果已登录，则加入 admin 频道
+        if (dashboardView.style.display === 'block') {
+            socket.emit('joinAdmin');
+        }
+    });
+
+    socket.on('adminDataUpdate', () => {
+        console.log('收到数据更新通知，正在刷新...');
+        if (dashboardView.style.display === 'block') {
+            loadDashboardData();
+        }
+    });
 
     // --- API 请求封装 ---
     async function apiRequest(url, options = {}) {
@@ -40,6 +57,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function showDashboardView() {
         loginView.style.display = 'none';
         dashboardView.style.display = 'block';
+        socket.emit('joinAdmin'); // 加入 admin 频道以接收实时更新
         loadDashboardData();
     }
 
@@ -157,15 +175,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ roomId }),
             });
-            // 无需手动刷新，下次加载会自动更新
         } else if (target.classList.contains('delete-btn')) {
             if (confirm(`确定要强制删除房间 ${roomId} 吗？`)) {
-                const result = await apiRequest('/admin/api/rooms/delete', {
+                await apiRequest('/admin/api/rooms/delete', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ roomId }),
                 });
-                if (result) loadDashboardData();
             }
         } else if (target.classList.contains('manage-players-btn')) {
             openPlayerModal(roomId);
@@ -190,8 +206,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ roomId, nickname }),
                 });
-                loadAndRenderPlayers(roomId); // 刷新玩家列表
-                loadDashboardData(); // 刷新房间列表（人数可能变化）
+                loadAndRenderPlayers(roomId);
             }
         }
     });

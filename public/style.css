@@ -45,12 +45,12 @@ h1, h3 { color: #333; border-bottom: 2px solid #eee; padding-bottom: 10px; }
 #messages { list-style-type: none; margin: 0; padding: 20px; overflow-y: auto; flex: 1; }
 #messages li { padding: 8px 12px; margin-bottom: 8px; border-radius: 8px; background: #e9e9eb; max-width: 80%; word-wrap: break-word; }
 #messages li.game-message { background-color: #d1ecf1; color: #0c5460; text-align: center; max-width: 100%; font-style: italic; }
-#form { display: flex; padding: 20px; background-color: #fff; border-top: 1px solid #ddd; }
 #messages li.private-message {
     background-color: #e9ecef;
     color: #495057;
     font-style: italic;
 }
+#form { display: flex; padding: 20px; background-color: #fff; border-top: 1px solid #ddd; }
 #input { border: 1px solid #ccc; padding: 10px; width: 100%; margin-right: 10px; border-radius: 5px; }
 #form button { border: none; padding: 10px 20px; color: white; border-radius: 5px; cursor: pointer; }
 #submit-answer-btn { background: #007bff; }
@@ -70,11 +70,31 @@ h1, h3 { color: #333; border-bottom: 2px solid #eee; padding-bottom: 10px; }
 #char-buttons { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: 10px; }
 .char-choice-btn { font-size: 1.2em; width: 40px; height: 40px; background-color: #fff; transition: background-color 0.2s, transform 0.2s; }
 .char-choice-btn:hover { background-color: #007bff; color: white; transform: scale(1.1); }
-/* 【核心修改】移除队列撤回按钮样式，只保留表单撤回按钮 */
 .withdraw-form-btn {
     background-color: #ffc107;
     border-color: #ffc107;
 }
 .withdraw-form-btn:hover {
     background-color: #e0a800;
+}
+
+/* 全局提示框样式 */
+.toast {
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background-color: #333;
+    color: white;
+    padding: 15px 25px;
+    border-radius: 8px;
+    z-index: 2000;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.3s, visibility 0.3s, top 0.3s;
+}
+.toast.show {
+    opacity: 1;
+    visibility: visible;
+    top: 40px;
 }
