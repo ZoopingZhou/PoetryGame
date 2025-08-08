@@ -408,6 +408,11 @@ function handlePlayerDisconnect(socket, { graceful = false }) {
 
     const room = rooms[roomId];
     const player = room.players[nickname];
+    // 关键修复：在尝试访问 room.players 之前，检查 room 是否存在
+    if (!room) {
+        return; // 房间已不存在，无需任何操作
+    }
+
     if (!player) return;
 
     if (graceful) {
