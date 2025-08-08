@@ -1,0 +1,91 @@
+
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>游戏后台管理</title>
+    <link rel="stylesheet" href="/admin.css">
+</head>
+<body>
+    <div id="app">
+        <!-- 登录视图 -->
+        <div id="login-view" class="view">
+            <div class="login-container">
+                <h1>后台管理登录</h1>
+                <form id="login-form">
+                    <input type="password" id="password-input" placeholder="请输入管理员密码" required>
+                    <button type="submit">登录</button>
+                </form>
+                <p id="login-error" class="error"></p>
+            </div>
+        </div>
+
+        <!-- 管理面板视图 -->
+        <div id="dashboard-view" class="view" style="display: none;">
+            <header>
+                <h1>游戏后台管理</h1>
+                <button id="logout-btn">退出登录</button>
+            </header>
+            <main>
+                <!-- 房间管理 -->
+                <section class="panel">
+                    <h2>房间管理</h2>
+                    <div id="room-management">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>房间ID</th>
+                                    <th>在线人数</th>
+                                    <th>永久存在</th>
+                                    <th>玩家管理</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="room-list-body">
+                                <!-- 房间列表将动态插入这里 -->
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <!-- 诗句缓存管理 -->
+                <section class="panel">
+                    <h2>诗句缓存管理</h2>
+                    <div id="cache-management">
+                        <div class="cache-controls">
+                            <input type="text" id="cache-search-input" placeholder="搜索诗句...">
+                            <form id="add-cache-form">
+                                <input type="text" id="add-cache-input" placeholder="添加新诗句..." required>
+                                <button type="submit">添加</button>
+                            </form>
+                        </div>
+                        <ul id="cache-list">
+                            <!-- 缓存列表将动态插入这里 -->
+                        </ul>
+                    </div>
+                </section>
+            </main>
+        </div>
+
+        <!-- 玩家管理模态框 -->
+        <div id="player-modal" class="modal" style="display: none;">
+            <div class="modal-content">
+                <span class="close-btn">&times;</span>
+                <h2 id="player-modal-title">管理玩家</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>昵称</th>
+                            <th>分数</th>
+                            <th>状态</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="player-list-body"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    <script src="/admin.js"></script>
+</body>
+</html>

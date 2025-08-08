@@ -4,6 +4,10 @@ const socketIo = require('socket.io');
 const path = require('path');
 const crypto = require('crypto');
 const fs = require('fs').promises;
+const bodyParser = require('body-parser');
+const cookieParser = require('cookie-parser');
+const session = require('express-session');
+const readline = require('readline');
 
 const app = express();
 const server = http.createServer(app);
@@ -12,6 +16,7 @@ const io = socketIo(server);
 const DATA_DIR = path.join(__dirname, 'data');
 const ROOMS_FILE = path.join(DATA_DIR, 'rooms.json');
 const VALID_SENTENCES_FILE = path.join(DATA_DIR, 'valid_sentences.json');
+const ADMIN_FILE = path.join(DATA_DIR, 'admin.json');
 
 let rooms = {};
 let localCache = [];
@@ -123,6 +128,155 @@ function broadcastMessage(roomId, messageContent, messageClass = 'game-message')
     io.to(roomId).emit('newMessage', message);
 }
 
+// ======================================================
+// Admin Panel Logic
+// ======================================================
+let adminConfig = {};
+
+function hashPassword(password, salt) {
+    return crypto.pbkdf2Sync(password, salt, 100000, 64, 'sha512').toString('hex');
+}
+
+async function verifyPassword(password, salt, hash) {
+    return hashPassword(password, salt) === hash;
+}
+
+app.use(cookieParser());
+app.use(bodyParser.json());
+app.use(session({
+    secret: crypto.randomBytes(32).toString('hex'), // 随机生成secret
+    resave: false,
+    saveUninitialized: true,
+    cookie: { secure: false } // 在生产环境中应设为 true (需要HTTPS)
+}));
+
+const authMiddleware = (req, res, next) => {
+    if (req.session.isAdmin) {
+        next();
+    } else {
+        res.status(401).json({ message: '未授权' });
+    }
+};
+
+app.get('/admin', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'admin.html'));
+});
+
+app.post('/admin/login', async (req, res) => {
+    const { password } = req.body;
+    if (!adminConfig.salt || !adminConfig.hash) {
+        return res.status(403).json({ message: '管理员密码尚未设置' });
+    }
+    const isValid = await verifyPassword(password, adminConfig.salt, adminConfig.hash);
+    if (isValid) {
+        req.session.isAdmin = true;
+        res.json({ success: true });
+    } else {
+        res.status(401).json({ message: '密码错误' });
+    }
+});
+
+app.post('/admin/logout', (req, res) => {
+    req.session.destroy();
+    res.json({ success: true });
+});
+
+// API routes
+const adminApiRouter = express.Router();
+adminApiRouter.use(authMiddleware);
+
+adminApiRouter.get('/status', (req, res) => {
+    res.json({ isAdmin: true });
+});
+
+adminApiRouter.get('/data', (req, res) => {
+    const roomList = Object.values(rooms).map(room => ({
+        id: room.id,
+        playerCount: Object.values(room.players).filter(p => p.online).length,
+        isPermanent: !!room.isPermanent
+    }));
+    res.json({ rooms: roomList, cache: [...localCache].sort() });
+});
+
+adminApiRouter.get('/rooms/:roomId/players', (req, res) => {
+    const { roomId } = req.params;
+    const room = rooms[roomId];
+    if (room) {
+        res.json(Object.values(room.players));
+    } else {
+        res.status(404).json({ message: '房间不存在' });
+    }
+});
+
+adminApiRouter.post('/rooms/toggle-permanent', (req, res) => {
+    const { roomId } = req.body;
+    if (rooms[roomId]) {
+        rooms[roomId].isPermanent = !rooms[roomId].isPermanent;
+        res.json({ success: true, isPermanent: rooms[roomId].isPermanent });
+        scheduleSaveRooms();
+    } else {
+        res.status(404).json({ message: '房间不存在' });
+    }
+});
+
+adminApiRouter.post('/rooms/players/delete', (req, res) => {
+    const { roomId, nickname } = req.body;
+    const room = rooms[roomId];
+    if (room && room.players[nickname]) {
+        // 管理员移除玩家，无论是否永久房间都直接移除
+        const player = room.players[nickname];
+        if (player.online && io.sockets.sockets.get(player.socketId)) {
+            io.sockets.sockets.get(player.socketId).disconnect();
+        }
+        removePlayerFromRoom(roomId, nickname);
+        broadcastGameState(roomId);
+        res.json({ success: true });
+    } else {
+        res.status(404).json({ message: '玩家或房间不存在' });
+    }
+});
+
+adminApiRouter.post('/rooms/delete', (req, res) => {
+    const { roomId } = req.body;
+    if (rooms[roomId]) {
+        delete rooms[roomId];
+        broadcastRoomList();
+        res.json({ success: true });
+        scheduleSaveRooms();
+    } else {
+        res.status(404).json({ message: '房间不存在' });
+    }
+});
+
+adminApiRouter.post('/cache/add', (req, res) => {
+    const { sentence } = req.body;
+    const normalized = normalizeSentence(sentence);
+    if (normalized && !localCache.includes(normalized)) {
+        localCache.push(normalized);
+        localCache.sort();
+        scheduleSaveCache();
+        res.json({ success: true });
+    } else {
+        res.status(400).json({ message: '诗句无效或已存在' });
+    }
+});
+
+adminApiRouter.post('/cache/delete', (req, res) => {
+    const { sentence } = req.body;
+    const normalized = normalizeSentence(sentence);
+    const index = localCache.indexOf(normalized);
+    if (index > -1) {
+        localCache.splice(index, 1);
+        scheduleSaveCache();
+        res.json({ success: true });
+    } else {
+        res.status(404).json({ message: '诗句不存在' });
+    }
+});
+
+app.use('/admin/api', adminApiRouter);
+
+
 function removePlayerFromRoom(roomId, nickname) {
     const room = rooms[roomId];
     if (!room || !room.players[nickname]) return false;
@@ -130,7 +284,7 @@ function removePlayerFromRoom(roomId, nickname) {
     delete room.players[nickname];
     delete reconnectTimeouts[nickname];
 
-    if (Object.keys(room.players).length === 0) {
+    if (Object.keys(room.players).length === 0 && !room.isPermanent) {
         console.log(`房间 [${roomId}] 因无人而销毁。`);
         delete rooms[roomId];
         return true;
@@ -180,6 +334,7 @@ io.on('connection', (socket) => {
             id: roomId,
             name: roomId,
             players: {},
+            isPermanent: false,
             currentStartChar: '月',
             usedSentences: [],
             validationQueue: [],
@@ -257,12 +412,25 @@ function handlePlayerDisconnect(socket, { graceful = false }) {
     if (!player) return;
 
     if (graceful) {
-        broadcastMessage(roomId, `--- 玩家【${player.nickname}】离开了房间 ---`);
-        removePlayerFromRoom(roomId, nickname);
+        // 如果是永久房间，玩家主动退出只标记为离线
+        if (room.isPermanent) {
+            player.online = false;
+            player.disconnectTime = Date.now();
+            broadcastMessage(roomId, `--- 玩家【${player.nickname}】离开了房间 ---`);
+        } else {
+            broadcastMessage(roomId, `--- 玩家【${player.nickname}】离开了房间 ---`);
+            removePlayerFromRoom(roomId, nickname);
+        }
     } else {
         player.online = false;
         player.disconnectTime = Date.now();
         broadcastMessage(roomId, `--- 玩家【${player.nickname}】已断开连接，等待重连... ---`);
+
+        // 只有非永久房间的玩家才会启动超时计时器
+        if (room.isPermanent) {
+            return;
+        }
+
         reconnectTimeouts[nickname] = setTimeout(() => {
             if (
                 rooms[roomId] &&
@@ -394,6 +562,7 @@ function scheduleSaveRooms() {
                 roomsToSave[roomId] = {
                     id: rooms[roomId].id,
                     name: rooms[roomId].name,
+                    isPermanent: rooms[roomId].isPermanent,
                     // 保存时，擦除临时的 socketId
                     players: Object.fromEntries(
                         Object.entries(rooms[roomId].players).map(([nick, data]) => [
@@ -652,8 +821,39 @@ function startNewRound(roomId, newChar, chooserId) {
     broadcastGameState(roomId);
 }
 
+async function setupAdmin() {
+    try {
+        const adminData = await fs.readFile(ADMIN_FILE, 'utf8');
+        adminConfig = JSON.parse(adminData);
+    } catch (error) {
+        if (error.code === 'ENOENT') {
+            console.log('未找到管理员配置文件。请设置管理员密码:');
+            const rl = readline.createInterface({
+                input: process.stdin,
+                output: process.stdout
+            });
+            rl.question('请输入新密码: ', async (password) => {
+                if (password) {
+                    const salt = crypto.randomBytes(16).toString('hex');
+                    const hash = hashPassword(password, salt);
+                    adminConfig = { salt, hash };
+                    await fs.writeFile(ADMIN_FILE, JSON.stringify(adminConfig, null, 2));
+                    console.log('管理员密码已设置并保存。');
+                } else {
+                    console.log('密码不能为空，服务器将以无管理员权限模式运行。');
+                }
+                rl.close();
+            });
+        } else {
+            console.error('加载管理员配置失败:', error);
+        }
+    }
+}
+
+
 (async function loadData() {
     try {
+        await setupAdmin();
         await fs.mkdir(DATA_DIR, { recursive: true });
         try {
             const roomsData = await fs.readFile(ROOMS_FILE, 'utf8');
@@ -667,6 +867,11 @@ function startNewRound(roomId, newChar, chooserId) {
                     player.online = false;
 
                     if (player.disconnectTime) {
+                        // 如果是永久房间，则跳过该玩家的超时处理
+                        if (rooms[roomId].isPermanent) {
+                            continue;
+                        }
+
                         const offlineDuration = Date.now() - player.disconnectTime;
                         if (offlineDuration >= RECONNECT_TIMEOUT_MS) {
                             console.log(`玩家【${nickname}】在服务器重启后因超时被移除。`);

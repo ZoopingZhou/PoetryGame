@@ -55,7 +55,9 @@
 ```bash
 npm install
 ```
-这将会安装 `express` 和 `socket.io`。
+这将会根据 `package.json` 文件安装所有必需的依赖库，包括 `express`, `socket.io`, `body-parser` 等。
+
+**对于已克隆本项目的协作者**：在拉取了包含 `package.json` 变更的更新后，请重新运行 `npm install` 以确保您的本地依赖是最新的。
 
 ### 3. 运行服务器
 
