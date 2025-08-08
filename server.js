@@ -45,18 +45,6 @@ function broadcastRoomList() {
     io.to('lobby').emit('roomListUpdate', getLobbyInfo());
 }
 
-function findRoomBySocketId(socketId) {
-    for (const roomId in rooms) {
-        if (rooms[roomId].players[socketId]) {
-            return roomId;
-        }
-    }
-    return null;
-}
-function findNicknameBySocketId(roomId, socketId) {
-    return rooms[roomId]?.players[socketId]?.nickname;
-}
-
 function getSerializableRoomState(roomId) {
     const room = rooms[roomId];
     if (!room) return null;
@@ -68,7 +56,7 @@ function getSerializableRoomState(roomId) {
     if (room.currentVote) {
         gameStateMessage = '投票中';
     } else if (choiceTimeouts[roomId]) {
-        const winnerNickname = choiceTimeouts[roomId].winnerNickname || '';
+        const winnerNickname = choiceTimeouts[roomId].winnerNickname || '一位玩家';
         gameStateMessage = `选择新字 (等待【${winnerNickname}】)`;
     } else if (room.validationQueue.length > 0) {
         gameStateMessage = `验证中 ([${room.validationQueue[0].answer}])`;
@@ -77,7 +65,13 @@ function getSerializableRoomState(roomId) {
     }
 
     return {
-        players: room.players,
+        // 构造一个不暴露 socketId 的 players 对象给客户端
+        players: Object.fromEntries(
+            Object.entries(room.players).map(([nickname, data]) => [
+                nickname,
+                { nickname: data.nickname, score: data.score, online: data.online },
+            ])
+        ),
         currentStartChar: room.currentStartChar,
         queue: room.validationQueue,
         currentVote: room.currentVote ? {
@@ -113,6 +107,12 @@ app.get('/room/:roomId', (req, res) => {
 io.on('connection', (socket) => {
     console.log(`一位玩家已连接: ${socket.id}`);
     socket.join('lobby');
+
+    // 在 socket 连接对象上附加一个查找函数，方便后续使用
+    socket.getPlayerInfo = function() {
+        if (!this.roomId || !this.nickname) return null;
+        return rooms[this.roomId]?.players[this.nickname];
+    };
 
     socket.on('getRooms', () => {
         socket.emit('roomListUpdate', getLobbyInfo());
@@ -171,16 +171,13 @@ io.on('connection', (socket) => {
     });
 
     socket.on('submitAnswer', (answer) => {
-        const roomId = findRoomBySocketId(socket.id);
-        if (roomId) handlePlayerInput(socket, roomId, answer);
+        if (socket.roomId) handlePlayerInput(socket, socket.roomId, answer);
     });
 
     socket.on('withdrawAnswer', () => {
-        const roomId = findRoomBySocketId(socket.id);
-        if (!roomId) return;
-        const room = rooms[roomId];
-        const nickname = findNicknameBySocketId(roomId, socket.id);
-        if (!nickname) return;
+        if (!socket.roomId || !socket.nickname) return;
+        const room = rooms[socket.roomId];
+        const nickname = socket.nickname;
 
         const isVotingOnThis = room.currentVote && room.currentVote.submission.nickname === nickname;
         
@@ -189,56 +186,55 @@ io.on('connection', (socket) => {
             (submission) => submission.nickname !== nickname
         );
 
-        if (room.validationQueue.length < initialLength) {
-            io.to(roomId).emit('gameMessage', `玩家【${nickname}】撤回了答案。`);
+        if (room.validationQueue.length < initialLength && room.players[nickname] && socket.roomId) {
+            io.to(socket.roomId).emit('gameMessage', `玩家【${nickname}】撤回了答案。`);
             
             if (isVotingOnThis) {
                 Object.values(room.currentVote.timeouts).forEach(clearTimeout);
                 room.currentVote = null;
-                io.to(roomId).emit('gameMessage', `投票已中断。`);
+                io.to(socket.roomId).emit('gameMessage', `投票已中断。`);
             }
-            broadcastGameState(roomId);
-            processValidationQueue(roomId);
+            broadcastGameState(socket.roomId);
+            processValidationQueue(socket.roomId);
         }
     });
 
     socket.on('submitVote', (vote) => {
-        const roomId = findRoomBySocketId(socket.id);
-        if (roomId) handlePlayerVote(socket, roomId, vote);
+        if (socket.roomId) handlePlayerVote(socket, socket.roomId, vote);
     });
     socket.on('chooseNewChar', ({ char }) => {
-        const roomId = findRoomBySocketId(socket.id);
-        if (roomId) handleCharChoice(socket, roomId, char);
+        if (socket.roomId) handleCharChoice(socket, socket.roomId, char);
     });
 });
 
 function handlePlayerDisconnect(socket, { graceful = false }) {
-    const roomId = findRoomBySocketId(socket.id);
-    if (!roomId) return;
+    const { roomId, nickname } = socket;
+    if (!roomId || !nickname) return;
+
     const room = rooms[roomId];
-    const player = room.players[socket.id];
+    const player = room.players[nickname];
     if (!player) return;
 
     if (graceful) {
         io.to(roomId).emit('gameMessage', `--- 玩家【${player.nickname}】离开了房间 ---`);
-        delete room.players[socket.id];
+        delete room.players[nickname];
     } else {
         player.online = false;
         io.to(roomId).emit(
             'gameMessage',
             `--- 玩家【${player.nickname}】已断开连接，等待重连... ---`
         );
-        reconnectTimeouts[socket.id] = setTimeout(() => {
+        reconnectTimeouts[nickname] = setTimeout(() => {
             if (
                 rooms[roomId] &&
-                rooms[roomId].players[socket.id] &&
-                !rooms[roomId].players[socket.id].online
+                rooms[roomId].players[nickname] &&
+                !rooms[roomId].players[nickname].online
             ) {
                 console.log(
                     `玩家【${player.nickname}】重连超时，已从房间 [${roomId}] 移除。`
                 );
-                delete rooms[roomId].players[socket.id];
-                delete reconnectTimeouts[socket.id];
+                delete rooms[roomId].players[nickname];
+                delete reconnectTimeouts[nickname];
                 if (Object.keys(room.players).length === 0) {
                     delete rooms[roomId];
                     console.log(`房间 [${roomId}] 已被销毁。`);
@@ -292,54 +288,51 @@ function joinRoom(socket, roomId, nickname) {
         socket.emit('joinError', '该昵称在房间内已被使用。');
         return;
     }
-    const offlinePlayer = Object.values(room.players).find(
-        (p) => p.nickname.toLowerCase() === nickname.toLowerCase() && !p.online
-    );
+    
+    const offlinePlayer = room.players[nickname];
     if (offlinePlayer) {
-        const oldSocketId = Object.keys(room.players).find(id => room.players[id] === offlinePlayer);
-        reconnectPlayer(socket, roomId, nickname, oldSocketId);
+        reconnectPlayer(socket, roomId, nickname);
     } else {
         socket.leave('lobby');
         socket.join(roomId);
-        room.players[socket.id] = { nickname: nickname, score: 0, online: true };
+        // 附加身份信息到 socket
+        socket.roomId = roomId;
+        socket.nickname = nickname;
+
+        room.players[nickname] = { nickname: nickname, score: 0, online: true, socketId: socket.id };
         socket.emit('joinSuccess', { roomId: roomId, roomName: room.name });
         io.to(roomId).emit('gameMessage', `--- 欢迎玩家【${nickname}】加入房间！ ---`);
         
         if (room.currentVote) {
             socket.emit('voteInProgress', { answer: room.currentVote.submission.answer });
         }
-        
         broadcastGameState(roomId);
         broadcastRoomList();
         scheduleSaveRooms();
     }
 }
 
-function reconnectPlayer(socket, roomId, nickname, existingPlayerId = null) {
+function reconnectPlayer(socket, roomId, nickname) {
     const room = rooms[roomId];
     if (!room) {
         socket.emit('reconnectError', '房间已不存在。');
         return;
     }
-    let foundPlayerId = existingPlayerId;
-    if (!foundPlayerId) {
-        foundPlayerId = Object.keys(room.players).find(
-            (id) => room.players[id].nickname === nickname && !room.players[id].online
-        );
-    }
-    if (foundPlayerId) {
-        const playerData = room.players[foundPlayerId];
-        clearTimeout(reconnectTimeouts[foundPlayerId]);
-        delete reconnectTimeouts[foundPlayerId];
-        delete room.players[foundPlayerId];
-        const newPlayerData = {
-            nickname: playerData.nickname,
-            score: playerData.score,
-            online: true,
-        };
-        room.players[socket.id] = newPlayerData;
+    const playerData = room.players[nickname];
+
+    if (playerData && !playerData.online) {
+        clearTimeout(reconnectTimeouts[nickname]);
+        delete reconnectTimeouts[nickname];
+
+        playerData.online = true;
+        playerData.socketId = socket.id;
+
         socket.leave('lobby');
         socket.join(roomId);
+        // 附加身份信息到 socket
+        socket.roomId = roomId;
+        socket.nickname = nickname;
+
         socket.emit('joinSuccess', { roomId: roomId, roomName: room.name });
         io.to(roomId).emit('gameMessage', `--- 玩家【${nickname}】已重新连接！ ---`);
         
@@ -373,7 +366,13 @@ function scheduleSaveRooms() {
                 roomsToSave[roomId] = {
                     id: rooms[roomId].id,
                     name: rooms[roomId].name,
-                    players: rooms[roomId].players,
+                    // 保存时，擦除临时的 socketId
+                    players: Object.fromEntries(
+                        Object.entries(rooms[roomId].players).map(([nick, data]) => [
+                            nick,
+                            { nickname: data.nickname, score: data.score, online: false },
+                        ])
+                    ),
                     currentStartChar: rooms[roomId].currentStartChar,
                     usedSentences: rooms[roomId].usedSentences,
                     validationQueue: rooms[roomId].validationQueue,
@@ -407,8 +406,8 @@ function scheduleSaveCache() {
 
 function handlePlayerInput(socket, roomId, answer) {
     const room = rooms[roomId];
-    const nickname = findNicknameBySocketId(roomId, socket.id);
-    if (!nickname) return;
+    const { nickname } = socket;
+    if (!nickname || !room.players[nickname]) return;
 
     const alreadySubmitted = room.validationQueue.some(s => s.nickname === nickname);
     if (alreadySubmitted) {
@@ -466,16 +465,15 @@ async function processValidationQueue(roomId) {
 
 function handleCorrectAnswer(roomId, submission) {
     const room = rooms[roomId];
-    const winnerSocket = Object.entries(room.players).find(([id, player]) => player.nickname === submission.nickname && player.online);
-    if (!room || !winnerSocket) {
+    const winnerPlayer = room.players[submission.nickname];
+    if (!room || !winnerPlayer) {
         room.validationQueue = [];
         broadcastGameState(roomId);
         processValidationQueue(roomId);
         return;
     }
     
-    const winnerSocketId = winnerSocket[0];
-    room.players[winnerSocketId].score++;
+    winnerPlayer.score++;
     scheduleSaveRooms();
     room.validationQueue = [];
     const normalizedAnswer = normalizeSentence(submission.answer);
@@ -484,7 +482,7 @@ function handleCorrectAnswer(roomId, submission) {
         room.usedSentences.shift();
     }
     
-    const winnerNickname = room.players[winnerSocketId].nickname;
+    const winnerNickname = winnerPlayer.nickname;
     const CHOICE_DURATION_MS = 15000;
     const choiceEndTime = Date.now() + CHOICE_DURATION_MS;
     choiceTimeouts[roomId] = {
@@ -552,8 +550,8 @@ function handleVoteTimeout(roomId, nickname) {
 
 function handlePlayerVote(socket, roomId, vote) {
     const room = rooms[roomId];
-    const nickname = findNicknameBySocketId(roomId, socket.id);
-    if (!room || !room.currentVote || !nickname) return;
+    const { nickname } = socket;
+    if (!room || !room.currentVote || !nickname || !room.players[nickname]) return;
     if (
         room.currentVote.voters.includes(nickname) &&
         !room.currentVote.votes[nickname]
@@ -629,12 +627,12 @@ function handleVoteEnd(roomId) {
 function handleCharChoice(socket, roomId, char) {
     const room = rooms[roomId];
     const roomChoiceTimeout = choiceTimeouts[roomId];
-    const nickname = findNicknameBySocketId(roomId, socket.id);
+    const { nickname } = socket;
     if (!room || !roomChoiceTimeout) return;
     if (nickname === roomChoiceTimeout.winnerNickname) {
         clearTimeout(roomChoiceTimeout.timer);
         delete choiceTimeouts[roomId];
-        startNewRound(roomId, char, socket.id);
+        startNewRound(roomId, char, nickname);
     }
 }
 
@@ -644,8 +642,8 @@ function startNewRound(roomId, newChar, chooserId) {
     room.currentStartChar = newChar;
     const chooserNickname =
         chooserId === '系统'
-            ? '系统'
-            : room.players[chooserId]?.nickname || '一位玩家';
+            ? '系统' // chooserId is a nickname or '系统'
+            : chooserId;
     io.to(roomId).emit(
         'gameMessage',
         `🎉 ${chooserNickname} 指定新起始字为【${newChar}】。新一轮开始！`
@@ -659,9 +657,10 @@ function startNewRound(roomId, newChar, chooserId) {
         try {
             const roomsData = await fs.readFile(ROOMS_FILE, 'utf8');
             rooms = JSON.parse(roomsData);
+            // 在加载时，确保所有玩家都是离线状态，因为 socketId 已经失效
             for (const roomId in rooms) {
-                for (const socketId in rooms[roomId].players) {
-                    rooms[roomId].players[socketId].online = false;
+                for (const nickname in rooms[roomId].players) {
+                    rooms[roomId].players[nickname].online = false;
                 }
             }
             console.log('房间数据已成功加载。');
