@@ -68,7 +68,7 @@ function getSerializableRoomState(roomId) {
     if (room.currentVote) {
         gameStateMessage = '投票中';
     } else if (choiceTimeouts[roomId]) {
-        const winnerNickname = room.players[choiceTimeouts[roomId].winnerId]?.nickname || '';
+        const winnerNickname = choiceTimeouts[roomId].winnerNickname || '';
         gameStateMessage = `选择新字 (等待【${winnerNickname}】)`;
     } else if (room.validationQueue.length > 0) {
         gameStateMessage = `验证中 ([${room.validationQueue[0].answer}])`;
@@ -87,7 +87,7 @@ function getSerializableRoomState(roomId) {
             endTime: room.currentVote.endTime,
         } : null,
         choice: choiceTimeouts[roomId] ? { 
-            winnerId: choiceTimeouts[roomId].winnerId, 
+            winnerNickname: choiceTimeouts[roomId].winnerNickname,
             answer: choiceTimeouts[roomId].answer,
             endTime: choiceTimeouts[roomId].endTime,
         } : null, 
@@ -484,19 +484,21 @@ function handleCorrectAnswer(roomId, submission) {
         room.usedSentences.shift();
     }
     
-
+    const winnerNickname = room.players[winnerSocketId].nickname;
     const CHOICE_DURATION_MS = 15000;
     const choiceEndTime = Date.now() + CHOICE_DURATION_MS;
     choiceTimeouts[roomId] = {
-        winnerId: winnerSocketId,
+        winnerNickname: winnerNickname,
         answer: submission.answer,
         endTime: choiceEndTime,
         timer: setTimeout(() => {
             if (choiceTimeouts[roomId]) {
-                const winnerNickname = room.players[winnerSocketId]?.nickname;
+                // 超时后，删除状态并由系统开启新一轮
+                const timeoutWinnerNickname = choiceTimeouts[roomId].winnerNickname;
+                delete choiceTimeouts[roomId]; 
                 io.to(roomId).emit(
                     'gameMessage',
-                    `玩家【${winnerNickname}】选择超时，系统将自动选择。`
+                    `玩家【${timeoutWinnerNickname}】选择超时，系统将自动选择。`
                 );
                 const randomChar = normalizeSentence(submission.answer)[0] || '天';
                 startNewRound(roomId, randomChar, '系统');
@@ -627,8 +629,9 @@ function handleVoteEnd(roomId) {
 function handleCharChoice(socket, roomId, char) {
     const room = rooms[roomId];
     const roomChoiceTimeout = choiceTimeouts[roomId];
+    const nickname = findNicknameBySocketId(roomId, socket.id);
     if (!room || !roomChoiceTimeout) return;
-    if (socket.id === roomChoiceTimeout.winnerId) {
+    if (nickname === roomChoiceTimeout.winnerNickname) {
         clearTimeout(roomChoiceTimeout.timer);
         delete choiceTimeouts[roomId];
         startNewRound(roomId, char, socket.id);

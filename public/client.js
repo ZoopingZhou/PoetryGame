@@ -226,7 +226,7 @@ function renderGame(state) {
     // 渲染选字面板
     const choicePanel = gameElements.charChoicePanel;
 
-    if (state.choice && state.choice.winnerId === socket.id) {
+    if (state.choice && state.choice.winnerNickname === myNickname) {
         gameElements.charButtonsContainer.innerHTML = '';
         const uniqueChars = [...new Set(state.choice.answer.replace(/[\s\p{P}]/gu, ''))];
         uniqueChars.forEach((char) => {
