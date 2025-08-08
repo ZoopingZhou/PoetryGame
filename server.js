@@ -89,6 +89,7 @@ function getSerializableRoomState(roomId) {
         // 明确的布尔标记，表示是否正处于选字阶段
         isChoosingChar: !!choiceTimeouts[roomId],
         gameStateMessage: gameStateMessage,
+        messages: room.messages,
     };
 }
 
@@ -97,6 +98,31 @@ function broadcastGameState(roomId) {
     if (state) {
         io.to(roomId).emit('gameStateUpdate', state);
     }
+}
+
+function sendPrivateMessage(socket, messageContent) {
+    if (!socket) return;
+    const message = {
+        content: messageContent,
+        className: 'private-message', // 为私有消息指定一个特殊的类名
+        timestamp: Date.now(),
+    };
+    socket.emit('newMessage', message);
+}
+
+function broadcastMessage(roomId, messageContent, messageClass = 'game-message') {
+    const room = rooms[roomId];
+    if (!room) return;
+
+    const message = {
+        content: messageContent,
+        class: messageClass,
+        timestamp: Date.now(),
+    };
+    
+    room.messages.push(message);
+    if (room.messages.length > 50) room.messages.shift(); // 限制消息历史长度
+    io.to(roomId).emit('newMessage', message);
 }
 
 app.use(express.static(path.join(__dirname, 'public')));
@@ -144,6 +170,7 @@ io.on('connection', (socket) => {
             usedSentences: [],
             validationQueue: [],
             currentVote: null,
+            messages: [],
         };
         scheduleSaveRooms();
         console.log(`房间已创建: ${roomId}`);
@@ -187,12 +214,12 @@ io.on('connection', (socket) => {
         );
 
         if (room.validationQueue.length < initialLength && room.players[nickname] && socket.roomId) {
-            io.to(socket.roomId).emit('gameMessage', `玩家【${nickname}】撤回了答案。`);
+            broadcastMessage(socket.roomId, `玩家【${nickname}】撤回了答案。`);
             
             if (isVotingOnThis) {
                 Object.values(room.currentVote.timeouts).forEach(clearTimeout);
                 room.currentVote = null;
-                io.to(socket.roomId).emit('gameMessage', `投票已中断。`);
+                broadcastMessage(socket.roomId, `投票已中断。`);
             }
             broadcastGameState(socket.roomId);
             processValidationQueue(socket.roomId);
@@ -216,14 +243,12 @@ function handlePlayerDisconnect(socket, { graceful = false }) {
     if (!player) return;
 
     if (graceful) {
-        io.to(roomId).emit('gameMessage', `--- 玩家【${player.nickname}】离开了房间 ---`);
+        broadcastMessage(roomId, `--- 玩家【${player.nickname}】离开了房间 ---`);
         delete room.players[nickname];
     } else {
         player.online = false;
-        io.to(roomId).emit(
-            'gameMessage',
-            `--- 玩家【${player.nickname}】已断开连接，等待重连... ---`
-        );
+        player.disconnectTime = Date.now();
+        broadcastMessage(roomId, `--- 玩家【${player.nickname}】已断开连接，等待重连... ---`);
         reconnectTimeouts[nickname] = setTimeout(() => {
             if (
                 rooms[roomId] &&
@@ -239,10 +264,7 @@ function handlePlayerDisconnect(socket, { graceful = false }) {
                     delete rooms[roomId];
                     console.log(`房间 [${roomId}] 已被销毁。`);
                 } else {
-                    io.to(roomId).emit(
-                        'gameMessage',
-                        `--- 玩家【${player.nickname}】已掉线 ---`
-                    );
+                    broadcastMessage(roomId, `--- 玩家【${player.nickname}】已掉线 ---`);
                     broadcastGameState(roomId);
                 }
                 scheduleSaveRooms();
@@ -257,7 +279,7 @@ function handlePlayerDisconnect(socket, { graceful = false }) {
         clearTimeout(room.currentVote.timeouts[player.nickname]);
         delete room.currentVote.timeouts[player.nickname];
         room.currentVote.votes[player.nickname] = 'valid';
-        io.to(roomId).emit('gameMessage', `玩家【${player.nickname}】断开连接，自动计为赞同。`);
+        broadcastMessage(roomId, `玩家【${player.nickname}】断开连接，自动计为赞同。`);
         
         if (Object.keys(room.currentVote.votes).length >= room.currentVote.voters.length) {
             handleVoteEnd(roomId);
@@ -301,7 +323,7 @@ function joinRoom(socket, roomId, nickname) {
 
         room.players[nickname] = { nickname: nickname, score: 0, online: true, socketId: socket.id };
         socket.emit('joinSuccess', { roomId: roomId, roomName: room.name });
-        io.to(roomId).emit('gameMessage', `--- 欢迎玩家【${nickname}】加入房间！ ---`);
+        broadcastMessage(roomId, `--- 欢迎玩家【${nickname}】加入房间！ ---`);
         
         if (room.currentVote) {
             socket.emit('voteInProgress', { answer: room.currentVote.submission.answer });
@@ -326,6 +348,7 @@ function reconnectPlayer(socket, roomId, nickname) {
 
         playerData.online = true;
         playerData.socketId = socket.id;
+        delete playerData.disconnectTime;
 
         socket.leave('lobby');
         socket.join(roomId);
@@ -334,7 +357,7 @@ function reconnectPlayer(socket, roomId, nickname) {
         socket.nickname = nickname;
 
         socket.emit('joinSuccess', { roomId: roomId, roomName: room.name });
-        io.to(roomId).emit('gameMessage', `--- 玩家【${nickname}】已重新连接！ ---`);
+        broadcastMessage(roomId, `--- 玩家【${nickname}】已重新连接！ ---`);
         
         if (room.currentVote) {
             if (room.currentVote.voters.includes(nickname)) {
@@ -370,7 +393,7 @@ function scheduleSaveRooms() {
                     players: Object.fromEntries(
                         Object.entries(rooms[roomId].players).map(([nick, data]) => [
                             nick,
-                            { nickname: data.nickname, score: data.score, online: false },
+                            { nickname: data.nickname, score: data.score, online: false, disconnectTime: data.disconnectTime },
                         ])
                     ),
                     currentStartChar: rooms[roomId].currentStartChar,
@@ -381,6 +404,7 @@ function scheduleSaveRooms() {
                         votes: rooms[roomId].currentVote.votes,
                         voters: rooms[roomId].currentVote.voters,
                         endTime: rooms[roomId].currentVote.endTime,
+                        messages: rooms[roomId].messages,
                     } : null,
                 };
             }
@@ -411,23 +435,23 @@ function handlePlayerInput(socket, roomId, answer) {
 
     const alreadySubmitted = room.validationQueue.some(s => s.nickname === nickname);
     if (alreadySubmitted) {
-        socket.emit('gameMessage', '提示：你已提交一个答案，请等待验证或撤回。');
+        sendPrivateMessage(socket, '提示：你已提交一个答案，请等待验证或撤回。');
         return;
     }
     const trimmedAnswer = answer.trim();
     if (!trimmedAnswer) return;
     const illegalCharsRegex = /[\s\p{P}]/u;
     if (illegalCharsRegex.test(trimmedAnswer)) {
-        socket.emit('gameMessage', '提示：输入不应包含内部空格或任何标点符号。');
+        sendPrivateMessage(socket, '提示：输入不应包含内部空格或任何标点符号。');
         return;
     }
     const normalizedAnswer = normalizeSentence(trimmedAnswer);
     if (room.usedSentences.includes(normalizedAnswer)) {
-        socket.emit('gameMessage', `提示：诗句 [${trimmedAnswer}] 最近已被使用，请换一个。`);
+        sendPrivateMessage(socket, `提示：诗句 [${trimmedAnswer}] 最近已被使用，请换一个。`);
         return;
     }
     if (!trimmedAnswer.includes(room.currentStartChar)) {
-        socket.emit('gameMessage', '提示：您的答案不包含起始字，未被提交。');
+        sendPrivateMessage(socket, '提示：您的答案不包含起始字，未被提交。');
         return;
     }
     room.validationQueue.push({ answer: trimmedAnswer, nickname: nickname });
@@ -442,24 +466,15 @@ async function processValidationQueue(roomId) {
     
     const submission = room.validationQueue[0];
     broadcastGameState(roomId);
-    io.to(roomId).emit(
-        'gameMessage',
-        `正在验证 [${submission.answer}] (来自玩家【${submission.nickname}】)...`
-    );
+    broadcastMessage(roomId, `正在验证 [${submission.answer}] (来自玩家【${submission.nickname}】)...`);
     const normalizedKey = normalizeSentence(submission.answer);
     if (localCache.includes(normalizedKey)) {
         room.validationQueue.shift();
-        io.to(roomId).emit(
-            'gameMessage',
-            `[${submission.answer}] 命中缓存，确认为合法诗句！`
-        );
+        broadcastMessage(roomId, `[${submission.answer}] 命中缓存，确认为合法诗句！`);
         handleCorrectAnswer(roomId, submission);
         return;
     }
-    io.to(roomId).emit(
-        'gameMessage',
-        `[${submission.answer}] 将由玩家投票决定其有效性...`
-    );
+    broadcastMessage(roomId, `[${submission.answer}] 将由玩家投票决定其有效性...`);
     startPlayerVote(roomId, submission);
 }
 
@@ -494,10 +509,7 @@ function handleCorrectAnswer(roomId, submission) {
                 // 超时后，删除状态并由系统开启新一轮
                 const timeoutWinnerNickname = choiceTimeouts[roomId].winnerNickname;
                 delete choiceTimeouts[roomId]; 
-                io.to(roomId).emit(
-                    'gameMessage',
-                    `玩家【${timeoutWinnerNickname}】选择超时，系统将自动选择。`
-                );
+                broadcastMessage(roomId, `玩家【${timeoutWinnerNickname}】选择超时，系统将自动选择。`);
                 const randomChar = normalizeSentence(submission.answer)[0] || '天';
                 startNewRound(roomId, randomChar, '系统');
             }
@@ -540,7 +552,7 @@ function handleVoteTimeout(roomId, nickname) {
 
     room.currentVote.votes[nickname] = 'valid';
     delete room.currentVote.timeouts[nickname];
-    io.to(roomId).emit('gameMessage', `玩家【${nickname}】投票超时，自动计为赞同。`);
+    broadcastMessage(roomId, `玩家【${nickname}】投票超时，自动计为赞同。`);
     broadcastGameState(roomId);
 
     if (Object.keys(room.currentVote.votes).length >= room.currentVote.voters.length) {
@@ -560,10 +572,7 @@ function handlePlayerVote(socket, roomId, vote) {
         delete room.currentVote.timeouts[nickname];
 
         room.currentVote.votes[nickname] = vote;
-        io.to(roomId).emit(
-            'gameMessage',
-            `玩家【${nickname}】已投票。`
-        );
+        broadcastMessage(roomId, `玩家【${nickname}】已投票。`);
         broadcastGameState(roomId);
 
         if (Object.keys(room.currentVote.votes).length >= room.currentVote.voters.length) {
@@ -584,10 +593,7 @@ function handleVoteEnd(roomId) {
     if (totalVoters === 0) {
         room.currentVote = null;
         room.validationQueue.shift();
-        io.to(roomId).emit(
-            'gameMessage',
-            `[${submission.answer}] 无人投票，自动通过！`
-        );
+        broadcastMessage(roomId, `[${submission.answer}] 无人投票，自动通过！`);
         const normalizedKey = normalizeSentence(submission.answer);
         if (!localCache.includes(normalizedKey)) {
             localCache.push(normalizedKey);
@@ -605,20 +611,14 @@ function handleVoteEnd(roomId) {
     const normalizedKey = normalizeSentence(submission.answer);
 
     if (validVotes >= threshold) {
-        io.to(roomId).emit(
-            'gameMessage',
-            `[${submission.answer}] 投票通过！`
-        );
+        broadcastMessage(roomId, `[${submission.answer}] 投票通过！`);
         if (!localCache.includes(normalizedKey)) {
             localCache.push(normalizedKey);
         }
         scheduleSaveCache();
         handleCorrectAnswer(roomId, submission);
     } else {
-        io.to(roomId).emit(
-            'gameMessage',
-            `[${submission.answer}] 投票未通过。`
-        );
+        broadcastMessage(roomId, `[${submission.answer}] 投票未通过。`);
         broadcastGameState(roomId);
         processValidationQueue(roomId);
     }
@@ -644,10 +644,7 @@ function startNewRound(roomId, newChar, chooserId) {
         chooserId === '系统'
             ? '系统' // chooserId is a nickname or '系统'
             : chooserId;
-    io.to(roomId).emit(
-        'gameMessage',
-        `🎉 ${chooserNickname} 指定新起始字为【${newChar}】。新一轮开始！`
-    );
+    broadcastMessage(roomId, `🎉 ${chooserNickname} 指定新起始字为【${newChar}】。新一轮开始！`);
     broadcastGameState(roomId);
 }
 
@@ -657,10 +654,34 @@ function startNewRound(roomId, newChar, chooserId) {
         try {
             const roomsData = await fs.readFile(ROOMS_FILE, 'utf8');
             rooms = JSON.parse(roomsData);
+            const RECONNECT_TIMEOUT_MS = 30000;
+
             // 在加载时，确保所有玩家都是离线状态，因为 socketId 已经失效
             for (const roomId in rooms) {
+                if (!rooms[roomId].messages) rooms[roomId].messages = []; // 兼容旧数据
                 for (const nickname in rooms[roomId].players) {
-                    rooms[roomId].players[nickname].online = false;
+                    const player = rooms[roomId].players[nickname];
+                    player.online = false;
+
+                    if (player.disconnectTime) {
+                        const offlineDuration = Date.now() - player.disconnectTime;
+                        if (offlineDuration >= RECONNECT_TIMEOUT_MS) {
+                            console.log(`玩家【${nickname}】在服务器重启后因超时被移除。`);
+                            delete rooms[roomId].players[nickname];
+                        } else {
+                            const remainingTime = RECONNECT_TIMEOUT_MS - offlineDuration;
+                            reconnectTimeouts[nickname] = setTimeout(() => {
+                                if (rooms[roomId]?.players[nickname] && !rooms[roomId].players[nickname].online) {
+                                    console.log(`玩家【${nickname}】重连超时，已从房间 [${roomId}] 移除。`);
+                                    delete rooms[roomId].players[nickname];
+                                    delete reconnectTimeouts[nickname];
+                                    broadcastMessage(roomId, `--- 玩家【${nickname}】已掉线 ---`);
+                                    broadcastGameState(roomId);
+                                    broadcastRoomList();
+                                }
+                            }, remainingTime);
+                        }
+                    }
                 }
             }
             console.log('房间数据已成功加载。');

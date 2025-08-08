@@ -108,6 +108,16 @@ function clearSession() {
 // ========= 统一的UI渲染函数 ==========================
 // ======================================================
 function renderGame(state) {
+    // 渲染聊天记录
+    gameElements.messages.innerHTML = '';
+    if (state.messages) {
+        state.messages.forEach(msg => {
+            appendMessage(msg);
+        });
+    }
+    // 滚动到底部
+    gameElements.messages.scrollTop = gameElements.messages.scrollHeight;
+
     // 渲染分数榜
     gameElements.scoreBoard.innerHTML = '';
     if (state.players) {
@@ -398,15 +408,19 @@ socket.on('reconnectError', (errorMsg) => {
     showView('roomNotFound');
 });
 
-socket.on('gameMessage', function (msg) {
+function appendMessage(msg) {
     const item = document.createElement('li');
-    item.className = 'game-message';
-    item.textContent = msg;
+    item.className = msg.className || 'game-message';
+    item.textContent = msg.content;
     gameElements.messages.appendChild(item);
     gameElements.messages.scrollTop = gameElements.messages.scrollHeight;
+}
+
+socket.on('newMessage', (msg) => {
+    appendMessage(msg);
 });
 
-// 【核心修改】所有UI更新都汇集到这里
+// 收到完整的游戏状态时，重新渲染整个UI
 socket.on('gameStateUpdate', (state) => {
     renderGame(state);
 });
